@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: timescale/timescaledb-ha:pg17-all
+    # pg17-all includes: PostgreSQL 17, TimescaleDB, pgvector, pgvectorscale, pg_textsearch
+    environment:
+      POSTGRES_DB: onecortex_vector
+      POSTGRES_USER: onecortex_vector
+      POSTGRES_PASSWORD: onecortex_vector
+    ports:
+      - "5432:5432"
+    # pg_textsearch MUST be in shared_preload_libraries before CREATE EXTENSION is called.
+    # Set it here from day one so Phase 3 migrations work without any Docker config change.
+    command: >
+      postgres
+        -c shared_preload_libraries=pg_textsearch
+        -c max_connections=200
+        -c work_mem=64MB
+        -c maintenance_work_mem=256MB
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U onecortex_vector -d onecortex_vector"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      ONECORTEX_VECTOR_DATABASE_URL: postgres://onecortex_vector:onecortex_vector@postgres:5432/onecortex_vector
+      ONECORTEX_VECTOR_API_PORT: "8080"
+      ONECORTEX_VECTOR_ADMIN_PORT: "9090"
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
