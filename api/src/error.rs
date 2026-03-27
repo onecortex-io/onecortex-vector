@@ -39,13 +39,27 @@ struct ErrorDetail {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code, message) = match &self {
-            ApiError::InvalidArgument(msg) => (StatusCode::BAD_REQUEST, "INVALID_ARGUMENT", msg.clone()),
-            ApiError::NotFound(msg)        => (StatusCode::NOT_FOUND, "NOT_FOUND", msg.clone()),
-            ApiError::AlreadyExists(msg)   => (StatusCode::CONFLICT, "ALREADY_EXISTS", msg.clone()),
-            ApiError::Unauthenticated(msg) => (StatusCode::UNAUTHORIZED, "UNAUTHENTICATED", msg.clone()),
-            ApiError::PermissionDenied(msg)=> (StatusCode::FORBIDDEN, "PERMISSION_DENIED", msg.clone()),
-            ApiError::Internal(_)          => (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL", "Internal server error.".to_string()),
-            ApiError::Database(_)          => (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL", "Database error.".to_string()),
+            ApiError::InvalidArgument(msg) => {
+                (StatusCode::BAD_REQUEST, "INVALID_ARGUMENT", msg.clone())
+            }
+            ApiError::NotFound(msg) => (StatusCode::NOT_FOUND, "NOT_FOUND", msg.clone()),
+            ApiError::AlreadyExists(msg) => (StatusCode::CONFLICT, "ALREADY_EXISTS", msg.clone()),
+            ApiError::Unauthenticated(msg) => {
+                (StatusCode::UNAUTHORIZED, "UNAUTHENTICATED", msg.clone())
+            }
+            ApiError::PermissionDenied(msg) => {
+                (StatusCode::FORBIDDEN, "PERMISSION_DENIED", msg.clone())
+            }
+            ApiError::Internal(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "INTERNAL",
+                "Internal server error.".to_string(),
+            ),
+            ApiError::Database(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "INTERNAL",
+                "Database error.".to_string(),
+            ),
         };
 
         // Log internal errors — don't leak details to clients
@@ -55,7 +69,11 @@ impl IntoResponse for ApiError {
 
         let body = ErrorBody {
             status: status.as_u16(),
-            error: ErrorDetail { code, message, details: None },
+            error: ErrorDetail {
+                code,
+                message,
+                details: None,
+            },
         };
         (status, Json(body)).into_response()
     }

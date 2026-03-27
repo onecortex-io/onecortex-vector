@@ -1,7 +1,9 @@
 services:
   postgres:
-    image: timescale/timescaledb-ha:pg17-all
-    # pg17-all includes: PostgreSQL 17, TimescaleDB, pgvector, pgvectorscale, pg_textsearch
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # PostgreSQL 18 with pgvector, pgvectorscale, pg_textsearch built from source
     environment:
       POSTGRES_DB: onecortex_vector
       POSTGRES_USER: onecortex_vector
@@ -17,7 +19,7 @@ services:
         -c work_mem=64MB
         -c maintenance_work_mem=256MB
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U onecortex_vector -d onecortex_vector"]
       interval: 5s

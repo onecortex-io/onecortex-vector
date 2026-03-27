@@ -59,11 +59,17 @@ impl AppConfig {
             admin_port: env_parse("ONECORTEX_VECTOR_ADMIN_PORT", 9090)?,
             max_conns: env_parse("ONECORTEX_VECTOR_MAX_CONNS", 50)?,
             default_diskann_neighbors: env_parse("ONECORTEX_VECTOR_DEFAULT_DISKANN_NEIGHBORS", 50)?,
-            default_diskann_search_list: env_parse("ONECORTEX_VECTOR_DEFAULT_DISKANN_SEARCH_LIST", 100)?,
+            default_diskann_search_list: env_parse(
+                "ONECORTEX_VECTOR_DEFAULT_DISKANN_SEARCH_LIST",
+                100,
+            )?,
             enable_rls: env_parse("ONECORTEX_VECTOR_ENABLE_RLS", false)?,
-            log_level: std::env::var("ONECORTEX_VECTOR_LOG_LEVEL").unwrap_or_else(|_| "info".into()),
-            api_host: std::env::var("ONECORTEX_VECTOR_API_HOST").unwrap_or_else(|_| "localhost".into()),
-            rerank_backend: std::env::var("ONECORTEX_VECTOR_RERANK_BACKEND").unwrap_or_else(|_| "none".into()),
+            log_level: std::env::var("ONECORTEX_VECTOR_LOG_LEVEL")
+                .unwrap_or_else(|_| "info".into()),
+            api_host: std::env::var("ONECORTEX_VECTOR_API_HOST")
+                .unwrap_or_else(|_| "localhost".into()),
+            rerank_backend: std::env::var("ONECORTEX_VECTOR_RERANK_BACKEND")
+                .unwrap_or_else(|_| "none".into()),
             rerank_cohere_api_key: std::env::var("ONECORTEX_VECTOR_RERANK_COHERE_API_KEY").ok(),
             rerank_cohere_model: std::env::var("ONECORTEX_VECTOR_RERANK_COHERE_MODEL")
                 .unwrap_or_else(|_| "rerank-english-v3.0".into()),
@@ -82,7 +88,9 @@ where
     T::Err: std::fmt::Display,
 {
     match std::env::var(key) {
-        Ok(val) => val.parse::<T>().map_err(|e| format!("Invalid value for {key}: {e}")),
+        Ok(val) => val
+            .parse::<T>()
+            .map_err(|e| format!("Invalid value for {key}: {e}")),
         Err(_) => Ok(default),
     }
 }
