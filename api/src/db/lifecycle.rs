@@ -15,6 +15,7 @@ pub async fn create_index_schema(
     metric: &str,
     diskann_neighbors: u32,
     diskann_search_list: u32,
+    bm25_enabled: bool,
 ) -> Result<(), sqlx::Error> {
     // Operator class is determined by metric.
     // See docs/implementation/00-reference.md §5.
@@ -92,6 +93,22 @@ pub async fn create_index_schema(
     sqlx::query(&create_gin).execute(&mut *tx).await?;
     sqlx::query(&create_ns_idx).execute(&mut *tx).await?;
 
+    // BM25 index (only if enabled).
+    // OPERATOR REFERENCE (from reference/pg_textsearch/):
+    //   <@>   returns a NEGATIVE BM25 score. Negate it when computing relevance.
+    //   Syntax: USING bm25(column) WITH (text_config = 'english')
+    if bm25_enabled {
+        let create_bm25 = format!(
+            r#"
+            CREATE INDEX {schema_name}_bm25_idx
+                ON {schema_name}.vectors
+                USING bm25 (text_content)
+                WITH (text_config = 'english')
+            "#
+        );
+        sqlx::query(&create_bm25).execute(&mut *tx).await?;
+    }
+
     // Mark index as ready
     sqlx::query(
         "UPDATE _onecortex_vector.indexes SET status = 'ready', updated_at = now() WHERE id = $1",
@@ -143,4 +160,41 @@ pub async fn drop_index_schema(
 /// Format: "idx_{uuid_simple}" — UUID without hyphens, lowercase.
 pub fn schema_name_for(index_id: Uuid) -> String {
     format!("idx_{}", index_id.simple())
+}
+
+/// Builds (or rebuilds) the BM25 index on an existing schema.
+/// Called when PATCH /indexes/:name sets bm25_enabled=true on an existing index.
+pub async fn build_bm25_index(pool: &PgPool, schema_name: &str) -> Result<(), sqlx::Error> {
+    // DROP first in case a partial index exists from a previous failed attempt.
+    sqlx::query(&format!(
+        "DROP INDEX IF EXISTS {schema_name}.{schema_name}_bm25_idx"
+    ))
+    .execute(pool)
+    .await?;
+
+    sqlx::query(&format!(
+        r#"
+        CREATE INDEX {schema_name}_bm25_idx
+            ON {schema_name}.vectors
+            USING bm25 (text_content)
+            WITH (text_config = 'english')
+        "#
+    ))
+    .execute(pool)
+    .await?;
+
+    tracing::info!(schema_name, "BM25 index built successfully");
+    Ok(())
+}
+
+/// Drops only the BM25 index (when bm25_enabled is toggled off via PATCH).
+pub async fn drop_bm25_index(pool: &PgPool, schema_name: &str) -> Result<(), sqlx::Error> {
+    sqlx::query(&format!(
+        "DROP INDEX IF EXISTS {schema_name}.{schema_name}_bm25_idx"
+    ))
+    .execute(pool)
+    .await?;
+
+    tracing::info!(schema_name, "BM25 index dropped");
+    Ok(())
 }

@@ -19,7 +19,8 @@ pub async fn start_test_server() -> TestServer {
     // Seed test API key
     let api_key = onecortex_vector_api::middleware::auth::seed_test_key(&pool).await;
 
-    let state = onecortex_vector_api::state::AppState { pool: pool.clone(), config: config.clone() };
+    let reranker = onecortex_vector_api::planner::reranker::build_reranker(&config);
+    let state = onecortex_vector_api::state::AppState { pool: pool.clone(), config: config.clone(), reranker };
 
     // Build public router
     let router = build_test_router(state);
@@ -89,7 +90,37 @@ pub async fn create_test_index(server: &TestServer, dimension: i32, metric: &str
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), 201, "Failed to create test index");
+    let status = resp.status();
+    if status != 201 {
+        let body = resp.text().await.unwrap_or_default();
+        panic!("Failed to create test index (status={status}): {body}");
+    }
+    name.to_string()
+}
+
+/// Create a test index with BM25 enabled. Returns the index name.
+pub async fn create_test_index_with_bm25(server: &TestServer, dimension: i32, metric: &str) -> String {
+    let name = format!("test-{}", uuid::Uuid::new_v4().simple());
+    let name = &name[..name.len().min(45)];
+
+    let client = reqwest::Client::new();
+    let resp = client.post(format!("{}/indexes", server.base_url))
+        .header("Api-Key", &server.api_key)
+        .json(&serde_json::json!({
+            "name": name,
+            "dimension": dimension,
+            "metric": metric,
+            "bm25_enabled": true,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    let status = resp.status();
+    if status != 201 {
+        let body = resp.text().await.unwrap_or_default();
+        panic!("Failed to create BM25 test index (status={status}): {body}");
+    }
     name.to_string()
 }
 

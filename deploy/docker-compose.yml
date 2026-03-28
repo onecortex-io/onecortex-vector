@@ -1,9 +1,8 @@
 services:
   postgres:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    # PostgreSQL 18 with pgvector, pgvectorscale, pg_textsearch built from source
+    image: ghcr.io/joeychilson/railway-pg-vectorscale-textsearch:latest
+    platform: linux/amd64
+    # PostgreSQL with pgvector, pgvectorscale, pg_textsearch (pre-built image)
     environment:
       POSTGRES_DB: onecortex_vector
       POSTGRES_USER: onecortex_vector
@@ -42,5 +41,39 @@ services:
       postgres:
         condition: service_healthy
 
+  cross-encoder:
+    # HuggingFace Text Embeddings Inference — reranking mode.
+    #
+    # Default model: BAAI/bge-reranker-v2-m3
+    #   - Multilingual (100+ languages)
+    #   - 8,192 token context window (handles long documents without truncation)
+    #   - Strong recall on English + multilingual benchmarks
+    #   - ~280MB model size
+    #
+    # API:
+    #   POST /rerank  { "query": "...", "texts": ["...", "..."], "truncate": true }
+    #   Response:     [{ "index": 0, "score": 0.98 }, ...]
+    #
+    # This service is OPTIONAL. Only needed when:
+    #   ONECORTEX_VECTOR_RERANK_BACKEND=cross-encoder
+    # Comment it out if using a cloud reranker or no reranking.
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.5
+    command: --model-id BAAI/bge-reranker-v2-m3 --port 8080
+    ports:
+      - "8091:8080"
+    environment:
+      - HF_HUB_CACHE=/data
+    volumes:
+      - cross_encoder_cache:/data
+    profiles:
+      - reranking    # Only starts with: docker compose --profile reranking up
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s   # Model download (~280MB) takes time on first start.
+
 volumes:
   pgdata:
+  cross_encoder_cache:

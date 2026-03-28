@@ -92,4 +92,74 @@ describe('Live server integration', () => {
   it('throws OnecortexHttpError for missing index', async () => {
     await expect(pc.describeIndex('nonexistent-index-xyz')).rejects.toThrow(OnecortexHttpError);
   });
+
+  it('hybrid query returns matches', async () => {
+    const hybridIdx = 'ts-sdk-hybrid-test';
+    try {
+      await pc.createIndex({ name: hybridIdx, dimension: DIM, metric: 'cosine', bm25_enabled: true });
+      const idx = pc.index(hybridIdx);
+      await idx.upsert({
+        vectors: [
+          { id: 'v1', values: [1.0, 0.0, 0.0], text: 'machine learning basics' },
+          { id: 'v2', values: [0.0, 1.0, 0.0], text: 'cooking recipes' },
+        ],
+      });
+
+      const result = await idx.queryHybrid({
+        vector: [1.0, 0.0, 0.0],
+        text: 'machine learning',
+        topK: 2,
+      });
+      expect(result.matches.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      try { await pc.deleteIndex(hybridIdx); } catch {}
+    }
+  });
+
+  it('query with rerank is accepted', async () => {
+    const rerankIdx = 'ts-sdk-rerank-test';
+    try {
+      await pc.createIndex({ name: rerankIdx, dimension: DIM, metric: 'cosine', bm25_enabled: true });
+      const idx = pc.index(rerankIdx);
+      await idx.upsert({
+        vectors: [
+          { id: 'v1', values: [1.0, 0.0, 0.0], metadata: { text: 'machine learning' }, text: 'machine learning' },
+          { id: 'v2', values: [0.0, 1.0, 0.0], metadata: { text: 'cooking' }, text: 'cooking' },
+        ],
+      });
+
+      const result = await idx.query({
+        vector: [1.0, 0.0, 0.0],
+        topK: 5,
+        rerank: { query: 'machine learning', topN: 1, rankField: 'text' },
+      });
+      expect(result.matches.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      try { await pc.deleteIndex(rerankIdx); } catch {}
+    }
+  });
+
+  it('hybrid query with rerank is accepted', async () => {
+    const hybridRerankIdx = 'ts-sdk-hybrid-rerank-test';
+    try {
+      await pc.createIndex({ name: hybridRerankIdx, dimension: DIM, metric: 'cosine', bm25_enabled: true });
+      const idx = pc.index(hybridRerankIdx);
+      await idx.upsert({
+        vectors: [
+          { id: 'v1', values: [1.0, 0.0, 0.0], text: 'machine learning basics' },
+          { id: 'v2', values: [0.0, 1.0, 0.0], text: 'cooking recipes' },
+        ],
+      });
+
+      const result = await idx.queryHybrid({
+        vector: [1.0, 0.0, 0.0],
+        text: 'machine learning',
+        topK: 5,
+        rerank: { query: 'machine learning', topN: 1 },
+      });
+      expect(result.matches.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      try { await pc.deleteIndex(hybridRerankIdx); } catch {}
+    }
+  });
 });

@@ -26,6 +26,8 @@ fn default_metric() -> String { "cosine".to_string() }
 pub struct ConfigureIndexRequest {
     pub deletion_protection: Option<String>,
     pub tags: Option<serde_json::Value>,
+    #[serde(rename = "bm25Enabled")]
+    pub bm25_enabled: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -37,6 +39,8 @@ pub struct IndexResponse {
     pub host: String,
     pub spec: serde_json::Value,
     pub vector_type: String,
+    #[serde(rename = "bm25Enabled")]
+    pub bm25_enabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<serde_json::Value>,
 }
@@ -143,6 +147,7 @@ pub async fn create_index(
         &req.metric,
         state.config.default_diskann_neighbors,
         state.config.default_diskann_search_list,
+        bm25_enabled,
     ).await?;
 
     let host = format!("{}:{}", state.config.api_host, state.config.api_port);
@@ -155,6 +160,7 @@ pub async fn create_index(
         host,
         spec: serde_json::json!({}),
         vector_type: "dense".to_string(),
+        bm25_enabled,
         tags: req.tags,
     })))
 }
@@ -164,7 +170,7 @@ pub async fn list_indexes(
     State(state): State<AppState>,
 ) -> Result<Json<IndexListResponse>, ApiError> {
     let rows = sqlx::query(
-        "SELECT name, dimension, metric, status, tags FROM _onecortex_vector.indexes ORDER BY created_at"
+        "SELECT name, dimension, metric, status, bm25_enabled, tags FROM _onecortex_vector.indexes ORDER BY created_at"
     )
     .fetch_all(&state.pool)
     .await?;
@@ -176,6 +182,7 @@ pub async fn list_indexes(
         let dimension: i32 = r.get("dimension");
         let metric: String = r.get("metric");
         let status_str: String = r.get("status");
+        let bm25_enabled: bool = r.get("bm25_enabled");
         let tags: Option<serde_json::Value> = r.get("tags");
         IndexResponse {
             name,
@@ -193,6 +200,7 @@ pub async fn list_indexes(
             host: host.clone(),
             spec: serde_json::json!({}),
             vector_type: "dense".to_string(),
+            bm25_enabled,
             tags,
         }
     }).collect();
@@ -206,7 +214,7 @@ pub async fn describe_index(
     axum::extract::Path(name): axum::extract::Path<String>,
 ) -> Result<Json<IndexResponse>, ApiError> {
     let row = sqlx::query(
-        "SELECT id, name, dimension, metric, status, tags FROM _onecortex_vector.indexes WHERE name = $1",
+        "SELECT id, name, dimension, metric, status, bm25_enabled, tags FROM _onecortex_vector.indexes WHERE name = $1",
     )
     .bind(&name)
     .fetch_optional(&state.pool)
@@ -227,6 +235,7 @@ pub async fn describe_index(
         host,
         spec: serde_json::json!({}),
         vector_type: "dense".to_string(),
+        bm25_enabled: row.get("bm25_enabled"),
         tags: row.get("tags"),
     }))
 }
@@ -282,17 +291,36 @@ pub async fn configure_index(
         SET
             deletion_protected = COALESCE($2, deletion_protected),
             tags               = COALESCE($3::jsonb, tags),
+            bm25_enabled       = COALESCE($4, bm25_enabled),
             updated_at         = now()
         WHERE name = $1
-        RETURNING id, name, dimension, metric, status, deletion_protected, tags
+        RETURNING id, name, dimension, metric, status, deletion_protected, bm25_enabled, schema_name, tags
         "#,
     )
     .bind(&name)
     .bind(deletion_protected)
     .bind(&req.tags)
+    .bind(req.bm25_enabled)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::NotFound(format!("Index '{name}' does not exist.")))?;
+
+    // If bm25_enabled was toggled, build or drop the BM25 index in the background.
+    if let Some(bm25) = req.bm25_enabled {
+        let pool = state.pool.clone();
+        let schema_name: String = row.get("schema_name");
+        tokio::spawn(async move {
+            if bm25 {
+                if let Err(e) = crate::db::lifecycle::build_bm25_index(&pool, &schema_name).await {
+                    tracing::error!(error = %e, "BM25 index build failed");
+                }
+            } else {
+                if let Err(e) = crate::db::lifecycle::drop_bm25_index(&pool, &schema_name).await {
+                    tracing::error!(error = %e, "BM25 index drop failed");
+                }
+            }
+        });
+    }
 
     let host = format!("{}:{}", state.config.api_host, state.config.api_port);
     let status_str: String = row.get("status");
@@ -305,6 +333,7 @@ pub async fn configure_index(
         host,
         spec: serde_json::json!({}),
         vector_type: "dense".to_string(),
+        bm25_enabled: row.get("bm25_enabled"),
         tags: row.get("tags"),
     }))
 }

@@ -28,9 +28,12 @@ async fn main() {
         .await
         .expect("Failed to connect to database and run migrations");
 
+    let reranker = planner::reranker::build_reranker(&config);
+
     let state = state::AppState {
         pool,
         config: config.clone(),
+        reranker,
     };
 
     // Public API router -- all endpoints except /metrics

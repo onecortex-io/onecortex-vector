@@ -1,7 +1,26 @@
 use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
-use crate::{error::ApiError, state::AppState};
+use crate::{error::ApiError, planner::reranker::RerankCandidate, state::AppState};
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RerankOptions {
+    /// Query text for the reranker. Required — this is the natural-language question,
+    /// which may differ from the vector query (especially in hybrid search).
+    pub query: String,
+    /// Number of final results after reranking. Defaults to topK.
+    pub top_n: Option<i64>,
+    /// Which metadata field contains the text to rank against.
+    /// Default: "text". Falls back to vector id if the field is absent.
+    #[serde(default = "default_rank_field")]
+    pub rank_field: String,
+    /// Per-request model override. If set, uses this model instead of the server-side default.
+    /// Ignored by cross-encoder backend (model is fixed in the deployment).
+    pub model: Option<String>,
+}
+
+fn default_rank_field() -> String { "text".to_string() }
 
 #[derive(Deserialize)]
 pub struct QueryRequest {
@@ -15,6 +34,8 @@ pub struct QueryRequest {
     pub include_values: bool,
     #[serde(rename = "includeMetadata", default)]
     pub include_metadata: bool,
+    /// If present, reranking is performed after ANN retrieval.
+    pub rerank: Option<RerankOptions>,
 }
 
 #[derive(Serialize)]
@@ -87,8 +108,26 @@ pub async fn query_vectors(
         ("TRUE".to_string(), vec![])
     };
 
+    // When reranking: fetch top_k * 5 candidates to widen the reranker's pool,
+    // capped at 10,000 (absolute max) and at the provider's per-request limit.
+    let fetch_k = if req.rerank.is_some() {
+        let provider_max = state.reranker.max_candidates();
+        let provider_cap = if provider_max > 10_000 { 10_000i64 } else { provider_max as i64 };
+        (req.top_k * 5).min(10_000).min(provider_cap)
+    } else {
+        req.top_k
+    };
+
+    let top_n = req
+        .rerank
+        .as_ref()
+        .and_then(|r| r.top_n)
+        .unwrap_or(req.top_k);
+
+    // When reranking we always need metadata for the rank_field extraction
+    let need_metadata = req.include_metadata || req.rerank.is_some();
     let values_col    = if req.include_values { "values::text" } else { "NULL::text AS values" };
-    let metadata_col  = if req.include_metadata { "metadata" } else { "NULL::jsonb AS metadata" };
+    let metadata_col  = if need_metadata { "metadata" } else { "NULL::jsonb AS metadata" };
 
     // CRITICAL: ORDER BY must use the IDENTICAL operator expression as the SELECT distance column.
     // Using an alias in ORDER BY defeats DiskANN index usage. See 00-reference.md section 5.
@@ -108,7 +147,7 @@ pub async fn query_vectors(
     let mut query = sqlx::query(&sql)
         .bind(&vec_str)
         .bind(&namespace)
-        .bind(req.top_k);
+        .bind(fetch_k);
     for p in &filter_params {
         query = query.bind(p.as_str().unwrap_or(""));
     }
@@ -116,7 +155,7 @@ pub async fn query_vectors(
     let rows = query.fetch_all(&state.pool).await?;
 
     // Convert distances to scores -- see 00-reference.md section 4
-    let matches = rows.into_iter().map(|row| {
+    let mut matches: Vec<Match> = rows.into_iter().map(|row| {
         let id: String = row.get("id");
         let distance: f64 = row.get("distance");
         let values_str: Option<String> = row.get("values");
@@ -137,6 +176,48 @@ pub async fn query_vectors(
         }
     }).collect();
 
+    // Apply reranking if requested.
+    if let Some(rerank_opts) = &req.rerank {
+        let candidates: Vec<RerankCandidate> = matches
+            .into_iter()
+            .map(|m| {
+                let text = m.metadata
+                    .as_ref()
+                    .and_then(|meta| meta.get(&rerank_opts.rank_field))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                RerankCandidate {
+                    id: m.id,
+                    score: m.score as f32,
+                    text,
+                    metadata: m.metadata,
+                    values: m.values,
+                }
+            })
+            .collect();
+
+        let reranked = state
+            .reranker
+            .rerank(
+                &rerank_opts.query,
+                candidates,
+                top_n as usize,
+                rerank_opts.model.as_deref(),
+            )
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))?;
+
+        matches = reranked
+            .into_iter()
+            .map(|r| Match {
+                id: r.id,
+                score: r.rerank_score as f64,
+                metadata: if req.include_metadata { r.metadata } else { None },
+                values: r.values,
+            })
+            .collect();
+    }
+
     Ok(Json(QueryResponse {
         results: vec![],
         matches,
@@ -144,11 +225,75 @@ pub async fn query_vectors(
     }))
 }
 
-/// POST /indexes/:name/query/hybrid -- Phase 3 stub
+/// POST /indexes/:name/query/hybrid
 pub async fn query_hybrid(
-    State(_state): State<AppState>,
-    axum::extract::Path(_index_name): axum::extract::Path<String>,
-    Json(_req): Json<serde_json::Value>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    Err(ApiError::InvalidArgument("Hybrid search is not yet implemented. Coming in Phase 3.".to_string()))
+    State(state): State<AppState>,
+    axum::extract::Path(index_name): axum::extract::Path<String>,
+    Json(req): Json<crate::planner::hybrid::HybridQueryRequest>,
+) -> Result<Json<crate::planner::hybrid::HybridQueryResponse>, ApiError> {
+    if req.top_k < 1 || req.top_k > 10_000 {
+        return Err(ApiError::InvalidArgument("topK must be between 1 and 10000".to_string()));
+    }
+
+    let index = crate::handlers::vectors::resolve_index(&state.pool, &index_name).await?;
+
+    if !index.bm25_enabled {
+        return Err(ApiError::InvalidArgument(
+            "Hybrid search requires bm25_enabled=true on this index. \
+             Use PATCH /indexes/:name to enable it.".to_string()
+        ));
+    }
+
+    let mut result = crate::planner::hybrid::hybrid_query(
+        &state.pool,
+        &index.schema_name,
+        &req,
+        &index.metric,
+    ).await?;
+
+    // Apply reranking if requested.
+    if let Some(rerank_opts) = &req.rerank {
+        let top_n = rerank_opts.top_n.unwrap_or(req.top_k);
+        let candidates: Vec<RerankCandidate> = result
+            .matches
+            .into_iter()
+            .map(|m| {
+                let text = m.metadata
+                    .as_ref()
+                    .and_then(|meta| meta.get(&rerank_opts.rank_field))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                RerankCandidate {
+                    id: m.id,
+                    score: m.score as f32,
+                    text,
+                    metadata: m.metadata,
+                    values: m.values,
+                }
+            })
+            .collect();
+
+        let reranked = state
+            .reranker
+            .rerank(
+                &rerank_opts.query,
+                candidates,
+                top_n as usize,
+                rerank_opts.model.as_deref(),
+            )
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))?;
+
+        result.matches = reranked
+            .into_iter()
+            .map(|r| crate::planner::hybrid::HybridMatch {
+                id: r.id,
+                score: r.rerank_score as f64,
+                metadata: if req.include_metadata { r.metadata } else { None },
+                values: r.values,
+            })
+            .collect();
+    }
+
+    Ok(Json(result))
 }

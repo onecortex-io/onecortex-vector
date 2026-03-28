@@ -115,3 +115,66 @@ def test_update_metadata(oc_client):
 def test_not_found_error(oc_client):
     with pytest.raises(NotFoundError):
         oc_client.describe_index("nonexistent-index-xyz")
+
+
+HYBRID_INDEX = "sdk-hybrid-test"
+
+
+@pytest.fixture()
+def hybrid_cleanup(oc_client):
+    yield
+    try:
+        oc_client.delete_index(HYBRID_INDEX)
+    except Exception:
+        pass
+
+
+def test_query_hybrid(oc_client, hybrid_cleanup):
+    oc_client.create_index(name=HYBRID_INDEX, dimension=DIM, bm25_enabled=True)
+    idx = oc_client.Index(HYBRID_INDEX)
+    idx.upsert(vectors=[
+        {"id": "v1", "values": [1.0, 0.0, 0.0], "text": "machine learning basics"},
+        {"id": "v2", "values": [0.0, 1.0, 0.0], "text": "cooking recipes"},
+    ])
+
+    results = idx.query_hybrid(
+        vector=[1.0, 0.0, 0.0],
+        text="machine learning",
+        top_k=2,
+    )
+    assert len(results.matches) >= 1
+
+
+def test_query_with_rerank(oc_client, hybrid_cleanup):
+    """Rerank with noop backend: request is accepted and results are returned."""
+    oc_client.create_index(name=HYBRID_INDEX, dimension=DIM, bm25_enabled=True)
+    idx = oc_client.Index(HYBRID_INDEX)
+    idx.upsert(vectors=[
+        {"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"text": "machine learning"}, "text": "machine learning"},
+        {"id": "v2", "values": [0.0, 1.0, 0.0], "metadata": {"text": "cooking"}, "text": "cooking"},
+    ])
+
+    results = idx.query(
+        vector=[1.0, 0.0, 0.0],
+        top_k=5,
+        rerank={"query": "machine learning", "topN": 1, "rankField": "text"},
+    )
+    assert len(results.matches) >= 1
+
+
+def test_query_hybrid_with_rerank(oc_client, hybrid_cleanup):
+    """Hybrid query with reranking (noop backend)."""
+    oc_client.create_index(name=HYBRID_INDEX, dimension=DIM, bm25_enabled=True)
+    idx = oc_client.Index(HYBRID_INDEX)
+    idx.upsert(vectors=[
+        {"id": "v1", "values": [1.0, 0.0, 0.0], "text": "machine learning basics"},
+        {"id": "v2", "values": [0.0, 1.0, 0.0], "text": "cooking recipes"},
+    ])
+
+    results = idx.query_hybrid(
+        vector=[1.0, 0.0, 0.0],
+        text="machine learning",
+        top_k=5,
+        rerank={"query": "machine learning", "topN": 1},
+    )
+    assert len(results.matches) >= 1

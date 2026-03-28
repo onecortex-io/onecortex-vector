@@ -67,6 +67,24 @@ describe('Index client', () => {
     expect(result.matches[0].score).toBe(0.99);
   });
 
+  it('query with rerank sends rerank field', async () => {
+    let capturedBody: Record<string, unknown> = {};
+    server.use(
+      http.post(`${IDX_BASE}/query`, async ({ request }) => {
+        capturedBody = await request.json() as Record<string, unknown>;
+        return HttpResponse.json(QUERY_RESPONSE);
+      }),
+    );
+    const idx = makeIndex();
+    const result = await idx.query({
+      vector: [1.0, 0.0, 0.0],
+      topK: 5,
+      rerank: { query: 'machine learning', topN: 2, rankField: 'text' },
+    });
+    expect(result.matches[0].id).toBe('v1');
+    expect(capturedBody.rerank).toEqual({ query: 'machine learning', topN: 2, rankField: 'text' });
+  });
+
   it('queryHybrid returns matches', async () => {
     server.use(
       http.post(`${IDX_BASE}/query/hybrid`, () => HttpResponse.json(QUERY_RESPONSE)),
@@ -74,7 +92,7 @@ describe('Index client', () => {
     const idx = makeIndex();
     const result = await idx.queryHybrid({
       vector: [1.0, 0.0, 0.0],
-      queryText: 'hello',
+      text: 'hello',
       topK: 5,
     });
     expect(result.matches[0].id).toBe('v1');

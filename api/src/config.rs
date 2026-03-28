@@ -35,18 +35,45 @@ pub struct AppConfig {
     /// Returned in the `host` field of index descriptors.
     pub api_host: String,
 
-    /// ONECORTEX_VECTOR_RERANK_BACKEND — default "none"
-    /// Values: "none" | "cohere" | "cross-encoder"
+    /// Reranking backend. Values: "none" | "cohere" | "voyage" | "jina" | "pinecone" | "cross-encoder".
+    /// Default: "none" (reranking disabled — no latency overhead).
     pub rerank_backend: String,
 
-    /// ONECORTEX_VECTOR_RERANK_COHERE_API_KEY — no default
+    // ── Cohere ─────────────────────────────────────────────────────────────────
+    /// Required when rerank_backend = "cohere".
     pub rerank_cohere_api_key: Option<String>,
-
-    /// ONECORTEX_VECTOR_RERANK_COHERE_MODEL — default "rerank-english-v3.0"
+    /// Default: "rerank-v3.5" (multilingual, high quality).
+    /// Also available: "rerank-v4.0-pro", "rerank-english-v3.0".
     pub rerank_cohere_model: String,
 
-    /// ONECORTEX_VECTOR_RERANK_CROSS_ENCODER_URL — default "http://localhost:8091"
-    pub rerank_cross_encoder_url: String,
+    // ── Voyage AI ──────────────────────────────────────────────────────────────
+    /// Required when rerank_backend = "voyage".
+    pub rerank_voyage_api_key: Option<String>,
+    /// Default: "rerank-2.5". Also available: "rerank-2.5-lite", "rerank-2", "rerank-lite-1".
+    pub rerank_voyage_model: String,
+
+    // ── Jina AI ────────────────────────────────────────────────────────────────
+    /// Required when rerank_backend = "jina".
+    pub rerank_jina_api_key: Option<String>,
+    /// Default: "jina-reranker-v2-base-multilingual". Also: "jina-reranker-v1-base-en".
+    pub rerank_jina_model: String,
+
+    // ── Pinecone Inference ─────────────────────────────────────────────────────
+    /// Required when rerank_backend = "pinecone".
+    pub rerank_pinecone_api_key: Option<String>,
+    /// Default: "pinecone-rerank-v0". Also hosted: "bge-reranker-v2-m3", "cohere-rerank-3.5".
+    pub rerank_pinecone_model: String,
+
+    // ── Self-hosted cross-encoder (TEI) ───────────────────────────────────────
+    /// Required when rerank_backend = "cross-encoder".
+    /// Example: "http://cross-encoder:8080"
+    pub rerank_cross_encoder_url: Option<String>,
+
+    // ── Shared HTTP behavior ──────────────────────────────────────────────────
+    /// Timeout in seconds for reranker HTTP calls. Default: 30.
+    pub rerank_http_timeout_secs: u64,
+    /// Max retry attempts on 429 (rate limit). Default: 3. Applies to cloud backends only.
+    pub rerank_max_retries: u32,
 }
 
 impl AppConfig {
@@ -70,11 +97,29 @@ impl AppConfig {
                 .unwrap_or_else(|_| "localhost".into()),
             rerank_backend: std::env::var("ONECORTEX_VECTOR_RERANK_BACKEND")
                 .unwrap_or_else(|_| "none".into()),
+
             rerank_cohere_api_key: std::env::var("ONECORTEX_VECTOR_RERANK_COHERE_API_KEY").ok(),
             rerank_cohere_model: std::env::var("ONECORTEX_VECTOR_RERANK_COHERE_MODEL")
-                .unwrap_or_else(|_| "rerank-english-v3.0".into()),
-            rerank_cross_encoder_url: std::env::var("ONECORTEX_VECTOR_RERANK_CROSS_ENCODER_URL")
-                .unwrap_or_else(|_| "http://localhost:8091".into()),
+                .unwrap_or_else(|_| "rerank-v3.5".into()),
+
+            rerank_voyage_api_key: std::env::var("ONECORTEX_VECTOR_RERANK_VOYAGE_API_KEY").ok(),
+            rerank_voyage_model: std::env::var("ONECORTEX_VECTOR_RERANK_VOYAGE_MODEL")
+                .unwrap_or_else(|_| "rerank-2.5".into()),
+
+            rerank_jina_api_key: std::env::var("ONECORTEX_VECTOR_RERANK_JINA_API_KEY").ok(),
+            rerank_jina_model: std::env::var("ONECORTEX_VECTOR_RERANK_JINA_MODEL")
+                .unwrap_or_else(|_| "jina-reranker-v2-base-multilingual".into()),
+
+            rerank_pinecone_api_key: std::env::var("ONECORTEX_VECTOR_RERANK_PINECONE_API_KEY").ok(),
+            rerank_pinecone_model: std::env::var("ONECORTEX_VECTOR_RERANK_PINECONE_MODEL")
+                .unwrap_or_else(|_| "pinecone-rerank-v0".into()),
+
+            rerank_cross_encoder_url: std::env::var("ONECORTEX_VECTOR_RERANK_CROSS_ENCODER_URL").ok(),
+
+            rerank_http_timeout_secs: std::env::var("ONECORTEX_VECTOR_RERANK_HTTP_TIMEOUT_SECS")
+                .ok().and_then(|v| v.parse().ok()).unwrap_or(30),
+            rerank_max_retries: std::env::var("ONECORTEX_VECTOR_RERANK_MAX_RETRIES")
+                .ok().and_then(|v| v.parse().ok()).unwrap_or(3),
         })
     }
 }
@@ -107,6 +152,18 @@ mod tests {
         std::env::remove_var("ONECORTEX_VECTOR_MAX_CONNS");
         std::env::remove_var("ONECORTEX_VECTOR_DEFAULT_DISKANN_NEIGHBORS");
         std::env::remove_var("ONECORTEX_VECTOR_ENABLE_RLS");
+        std::env::remove_var("ONECORTEX_VECTOR_RERANK_BACKEND");
+        std::env::remove_var("ONECORTEX_VECTOR_RERANK_COHERE_API_KEY");
+        std::env::remove_var("ONECORTEX_VECTOR_RERANK_COHERE_MODEL");
+        std::env::remove_var("ONECORTEX_VECTOR_RERANK_VOYAGE_API_KEY");
+        std::env::remove_var("ONECORTEX_VECTOR_RERANK_VOYAGE_MODEL");
+        std::env::remove_var("ONECORTEX_VECTOR_RERANK_JINA_API_KEY");
+        std::env::remove_var("ONECORTEX_VECTOR_RERANK_JINA_MODEL");
+        std::env::remove_var("ONECORTEX_VECTOR_RERANK_PINECONE_API_KEY");
+        std::env::remove_var("ONECORTEX_VECTOR_RERANK_PINECONE_MODEL");
+        std::env::remove_var("ONECORTEX_VECTOR_RERANK_CROSS_ENCODER_URL");
+        std::env::remove_var("ONECORTEX_VECTOR_RERANK_HTTP_TIMEOUT_SECS");
+        std::env::remove_var("ONECORTEX_VECTOR_RERANK_MAX_RETRIES");
 
         let config = AppConfig::from_env().unwrap();
         assert_eq!(config.api_port, 8080);
@@ -116,5 +173,12 @@ mod tests {
         assert_eq!(config.default_diskann_search_list, 100);
         assert!(!config.enable_rls);
         assert_eq!(config.rerank_backend, "none");
+        assert_eq!(config.rerank_cohere_model, "rerank-v3.5");
+        assert_eq!(config.rerank_voyage_model, "rerank-2.5");
+        assert_eq!(config.rerank_jina_model, "jina-reranker-v2-base-multilingual");
+        assert_eq!(config.rerank_pinecone_model, "pinecone-rerank-v0");
+        assert!(config.rerank_cross_encoder_url.is_none());
+        assert_eq!(config.rerank_http_timeout_secs, 30);
+        assert_eq!(config.rerank_max_retries, 3);
     }
 }

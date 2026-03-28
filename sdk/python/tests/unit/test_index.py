@@ -135,8 +135,41 @@ def test_describe_index_stats():
 
 
 @respx.mock
+def test_query_with_rerank():
+    route = respx.post(f"{IDX_BASE}/query").mock(return_value=httpx.Response(200, json=QUERY_RESPONSE))
+    idx = make_index()
+    result = idx.query(
+        vector=[1.0, 0.0, 0.0],
+        top_k=5,
+        rerank={"query": "machine learning", "topN": 2, "rankField": "text"},
+    )
+    assert result.matches[0].id == "v1"
+    # Verify the rerank field was sent in the request body
+    sent_body = route.calls[0].request.content
+    import json
+    body = json.loads(sent_body)
+    assert body["rerank"] == {"query": "machine learning", "topN": 2, "rankField": "text"}
+
+
+@respx.mock
 def test_query_hybrid():
     respx.post(f"{IDX_BASE}/query/hybrid").mock(return_value=httpx.Response(200, json=QUERY_RESPONSE))
     idx = make_index()
-    result = idx.query_hybrid(vector=[1.0, 0.0, 0.0], query_text="hello", top_k=5)
+    result = idx.query_hybrid(vector=[1.0, 0.0, 0.0], text="hello", top_k=5)
     assert result.matches[0].id == "v1"
+
+
+@respx.mock
+def test_query_hybrid_with_rerank():
+    route = respx.post(f"{IDX_BASE}/query/hybrid").mock(return_value=httpx.Response(200, json=QUERY_RESPONSE))
+    idx = make_index()
+    result = idx.query_hybrid(
+        vector=[1.0, 0.0, 0.0],
+        text="hello",
+        top_k=5,
+        rerank={"query": "hello world", "topN": 3},
+    )
+    assert result.matches[0].id == "v1"
+    import json
+    body = json.loads(route.calls[0].request.content)
+    assert body["rerank"] == {"query": "hello world", "topN": 3}

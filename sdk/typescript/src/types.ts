@@ -49,6 +49,17 @@ export interface QueryResponse {
   results: unknown[]; // deprecated legacy field
 }
 
+export interface RerankOptions {
+  /** Natural-language query for the reranker. */
+  query: string;
+  /** Number of results after reranking. Defaults to topK. */
+  topN?: number;
+  /** Metadata field to rank against. Defaults to "text". */
+  rankField?: string;
+  /** Per-request model override for the reranker backend. */
+  model?: string;
+}
+
 export interface QueryOptions {
   vector?: number[];
   id?: string;
@@ -57,15 +68,21 @@ export interface QueryOptions {
   filter?: Record<string, unknown>;
   includeValues?: boolean;
   includeMetadata?: boolean;
+  /** Optional reranking after ANN retrieval. */
+  rerank?: RerankOptions;
 }
 
 export interface QueryHybridOptions {
   vector: number[];
-  queryText: string;
+  text: string;
   topK: number;
   alpha?: number;
   namespace?: string;
   filter?: Record<string, unknown>;
+  includeMetadata?: boolean;
+  includeValues?: boolean;
+  /** Optional reranking after RRF fusion. */
+  rerank?: RerankOptions;
 }
 
 export interface FetchOptions {

@@ -41,6 +41,7 @@ export class Index {
       filter: options.filter,
       includeValues: options.includeValues ?? false,
       includeMetadata: options.includeMetadata ?? true,
+      ...(options.rerank && { rerank: options.rerank }),
     }) as Promise<QueryResponse>;
   }
 
@@ -53,11 +54,14 @@ export class Index {
   async queryHybrid(options: QueryHybridOptions): Promise<QueryResponse> {
     return this.http.post(`${this.base}/query/hybrid`, {
       vector: options.vector,
-      queryText: options.queryText,
+      text: options.text,
       topK: options.topK,
-      alpha: options.alpha ?? 0.7,
+      alpha: options.alpha ?? 0.5,
       namespace: options.namespace ?? '',
-      filter: options.filter,
+      includeMetadata: options.includeMetadata ?? false,
+      includeValues: options.includeValues ?? false,
+      ...(options.filter && { filter: options.filter }),
+      ...(options.rerank && { rerank: options.rerank }),
     }) as Promise<QueryResponse>;
   }
 

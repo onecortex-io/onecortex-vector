@@ -46,6 +46,10 @@ prometheus = { version = "0.13", features = ["process"] }
 thiserror = "1"
 anyhow = "1"
 
+# HTTP client (reranker backends)
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+async-trait = "0.1"
+
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
 reqwest = { version = "0.12", features = ["json"] }

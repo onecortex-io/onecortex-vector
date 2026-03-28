@@ -40,7 +40,7 @@ async fn lifecycle_create_and_drop() {
 
     // Create the schema
     onecortex_vector_api::db::lifecycle::create_index_schema(
-        &pool, index_id, &schema_name, 3, "cosine", 50, 100,
+        &pool, index_id, &schema_name, 3, "cosine", 50, 100, false,
     ).await.unwrap();
 
     // Verify schema exists
