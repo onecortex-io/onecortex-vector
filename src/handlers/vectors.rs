@@ -12,20 +12,45 @@ pub struct IndexRecord {
 }
 
 pub async fn resolve_index(pool: &sqlx::PgPool, name: &str) -> Result<IndexRecord, ApiError> {
+    // Try direct index lookup first
     let row = sqlx::query(
-        "SELECT id, schema_name, dimension, metric, bm25_enabled FROM _onecortex_vector.indexes WHERE name = $1 AND status = 'ready'",
+        "SELECT id, schema_name, dimension, metric, bm25_enabled \
+         FROM _onecortex_vector.indexes WHERE name = $1 AND status = 'ready'",
+    )
+    .bind(name)
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some(row) = row {
+        return Ok(IndexRecord {
+            id: row.get("id"),
+            schema_name: row.get("schema_name"),
+            dimension: row.get("dimension"),
+            metric: row.get("metric"),
+            bm25_enabled: row.get("bm25_enabled"),
+        });
+    }
+
+    // Fall back to alias resolution: alias -> index_name -> index record
+    let alias_row = sqlx::query(
+        "SELECT i.id, i.schema_name, i.dimension, i.metric, i.bm25_enabled \
+         FROM _onecortex_vector.aliases a \
+         JOIN _onecortex_vector.indexes i ON a.index_name = i.name \
+         WHERE a.alias = $1 AND i.status = 'ready'",
     )
     .bind(name)
     .fetch_optional(pool)
     .await?
-    .ok_or_else(|| ApiError::NotFound(format!("Index '{name}' does not exist or is not ready.")))?;
+    .ok_or_else(|| {
+        ApiError::NotFound(format!("Index '{name}' does not exist or is not ready."))
+    })?;
 
     Ok(IndexRecord {
-        id: row.get("id"),
-        schema_name: row.get("schema_name"),
-        dimension: row.get("dimension"),
-        metric: row.get("metric"),
-        bm25_enabled: row.get("bm25_enabled"),
+        id: alias_row.get("id"),
+        schema_name: alias_row.get("schema_name"),
+        dimension: alias_row.get("dimension"),
+        metric: alias_row.get("metric"),
+        bm25_enabled: alias_row.get("bm25_enabled"),
     })
 }
 
@@ -458,4 +483,216 @@ pub fn parse_pgvector_str(s: &str) -> Vec<f32> {
         .split(',')
         .filter_map(|x| x.trim().parse().ok())
         .collect()
+}
+
+// --- Scroll ---
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScrollRequest {
+    pub namespace: Option<String>,
+    pub filter: Option<serde_json::Value>,
+    #[serde(default = "default_scroll_limit")]
+    pub limit: i64,
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub include_values: bool,
+    #[serde(default = "default_include_true")]
+    pub include_metadata: bool,
+}
+
+fn default_scroll_limit() -> i64 {
+    100
+}
+fn default_include_true() -> bool {
+    true
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScrollResponse {
+    pub vectors: Vec<ScrollVector>,
+    pub namespace: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct ScrollVector {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub values: Option<Vec<f32>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+}
+
+/// POST /indexes/:name/vectors/scroll
+pub async fn scroll_vectors(
+    State(state): State<AppState>,
+    axum::extract::Path(index_name): axum::extract::Path<String>,
+    Json(req): Json<ScrollRequest>,
+) -> Result<Json<ScrollResponse>, ApiError> {
+    let limit = req.limit.clamp(1, 1000);
+    let index = resolve_index(&state.pool, &index_name).await?;
+    let namespace = req.namespace.unwrap_or_default();
+    let schema = &index.schema_name;
+    let cursor = req.cursor.unwrap_or_default();
+
+    let values_col = if req.include_values {
+        "values::text"
+    } else {
+        "NULL::text AS values"
+    };
+    let metadata_col = if req.include_metadata {
+        "metadata"
+    } else {
+        "NULL::jsonb AS metadata"
+    };
+
+    let (filter_sql, filter_params) = if let Some(f) = &req.filter {
+        crate::planner::filter_translator::translate_filter(f, 2)
+            .map_err(|e| ApiError::InvalidArgument(e.to_string()))?
+    } else {
+        ("TRUE".to_string(), vec![])
+    };
+
+    let fetch_limit = limit + 1;
+
+    let sql = format!(
+        r#"
+        SELECT id, {values_col}, {metadata_col}
+        FROM {schema}.vectors
+        WHERE namespace = $1
+          AND id > $2
+          AND ({filter_sql})
+        ORDER BY id
+        LIMIT {fetch_limit}
+        "#
+    );
+
+    let mut query = sqlx::query(&sql).bind(&namespace).bind(&cursor);
+    for p in &filter_params {
+        query = query.bind(p.as_str().unwrap_or(""));
+    }
+
+    let rows = query.fetch_all(&state.pool).await?;
+
+    let has_more = rows.len() as i64 > limit;
+    let take_count = if has_more { limit as usize } else { rows.len() };
+
+    let vectors: Vec<ScrollVector> = rows
+        .into_iter()
+        .take(take_count)
+        .map(|row| {
+            let id: String = row.get("id");
+            let values_str: Option<String> = row.get("values");
+            let metadata: Option<serde_json::Value> = row.get("metadata");
+            ScrollVector {
+                id,
+                values: values_str.map(|s| parse_pgvector_str(&s)),
+                metadata,
+            }
+        })
+        .collect();
+
+    let next_cursor = if has_more {
+        vectors.last().map(|v| v.id.clone())
+    } else {
+        None
+    };
+
+    Ok(Json(ScrollResponse {
+        vectors,
+        namespace,
+        next_cursor,
+    }))
+}
+
+// --- Sample ---
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleRequest {
+    pub namespace: Option<String>,
+    pub filter: Option<serde_json::Value>,
+    #[serde(default = "default_sample_size")]
+    pub size: i64,
+    #[serde(default)]
+    pub include_values: bool,
+    #[serde(default = "default_include_true")]
+    pub include_metadata: bool,
+}
+
+fn default_sample_size() -> i64 {
+    10
+}
+
+#[derive(Serialize)]
+pub struct SampleResponse {
+    pub vectors: Vec<ScrollVector>,
+    pub namespace: String,
+}
+
+/// POST /indexes/:name/sample
+pub async fn sample_vectors(
+    State(state): State<AppState>,
+    axum::extract::Path(index_name): axum::extract::Path<String>,
+    Json(req): Json<SampleRequest>,
+) -> Result<Json<SampleResponse>, ApiError> {
+    let size = req.size.clamp(1, 1000);
+    let index = resolve_index(&state.pool, &index_name).await?;
+    let namespace = req.namespace.unwrap_or_default();
+    let schema = &index.schema_name;
+
+    let values_col = if req.include_values {
+        "values::text"
+    } else {
+        "NULL::text AS values"
+    };
+    let metadata_col = if req.include_metadata {
+        "metadata"
+    } else {
+        "NULL::jsonb AS metadata"
+    };
+
+    let (filter_sql, filter_params) = if let Some(f) = &req.filter {
+        crate::planner::filter_translator::translate_filter(f, 1)
+            .map_err(|e| ApiError::InvalidArgument(e.to_string()))?
+    } else {
+        ("TRUE".to_string(), vec![])
+    };
+
+    let sql = format!(
+        r#"
+        SELECT id, {values_col}, {metadata_col}
+        FROM {schema}.vectors
+        WHERE namespace = $1
+          AND ({filter_sql})
+        ORDER BY random()
+        LIMIT {size}
+        "#
+    );
+
+    let mut query = sqlx::query(&sql).bind(&namespace);
+    for p in &filter_params {
+        query = query.bind(p.as_str().unwrap_or(""));
+    }
+
+    let rows = query.fetch_all(&state.pool).await?;
+
+    let vectors: Vec<ScrollVector> = rows
+        .into_iter()
+        .map(|row| {
+            let id: String = row.get("id");
+            let values_str: Option<String> = row.get("values");
+            let metadata: Option<serde_json::Value> = row.get("metadata");
+            ScrollVector {
+                id,
+                values: values_str.map(|s| parse_pgvector_str(&s)),
+                metadata,
+            }
+        })
+        .collect();
+
+    Ok(Json(SampleResponse { vectors, namespace }))
 }

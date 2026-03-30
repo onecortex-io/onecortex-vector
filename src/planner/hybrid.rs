@@ -20,6 +20,8 @@ pub struct HybridQueryRequest {
     pub include_values: bool,
     /// If present, reranking is performed after RRF fusion.
     pub rerank: Option<crate::handlers::query::RerankOptions>,
+    #[serde(rename = "scoreThreshold")]
+    pub score_threshold: Option<f64>,
 }
 
 fn default_alpha() -> f32 {

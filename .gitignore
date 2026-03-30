@@ -16,3 +16,4 @@ target
 .claude/
 .DS_Store
 .env
+docs/

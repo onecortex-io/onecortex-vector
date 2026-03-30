@@ -38,6 +38,27 @@ pub struct QueryRequest {
     pub include_metadata: bool,
     /// If present, reranking is performed after ANN retrieval.
     pub rerank: Option<RerankOptions>,
+    #[serde(rename = "scoreThreshold")]
+    pub score_threshold: Option<f64>,
+    #[serde(rename = "groupBy")]
+    pub group_by: Option<GroupByOptions>,
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupByOptions {
+    pub field: String,
+    #[serde(default = "default_group_limit")]
+    pub limit: usize,
+    #[serde(default = "default_group_size")]
+    pub group_size: usize,
+}
+
+fn default_group_limit() -> usize {
+    10
+}
+fn default_group_size() -> usize {
+    3
 }
 
 #[derive(Serialize)]
@@ -57,16 +78,50 @@ pub struct Match {
     pub metadata: Option<serde_json::Value>,
 }
 
+#[derive(Deserialize)]
+pub struct BatchQueryRequest {
+    pub queries: Vec<QueryRequest>,
+}
+
+#[derive(Serialize)]
+pub struct BatchQueryResponse {
+    pub results: Vec<serde_json::Value>,
+}
+
 /// POST /indexes/:name/query
 pub async fn query_vectors(
     State(state): State<AppState>,
     axum::extract::Path(index_name): axum::extract::Path<String>,
     Json(req): Json<QueryRequest>,
-) -> Result<Json<QueryResponse>, ApiError> {
+) -> Result<Json<serde_json::Value>, ApiError> {
     if req.top_k < 1 || req.top_k > 10_000 {
         return Err(ApiError::InvalidArgument(
             "topK must be between 1 and 10000".to_string(),
         ));
+    }
+    if let Some(threshold) = req.score_threshold {
+        if !(0.0..=1.0).contains(&threshold) {
+            return Err(ApiError::InvalidArgument(
+                "scoreThreshold must be between 0.0 and 1.0".to_string(),
+            ));
+        }
+    }
+    if let Some(ref group_opts) = req.group_by {
+        if group_opts.field.is_empty() {
+            return Err(ApiError::InvalidArgument(
+                "groupBy.field must not be empty".to_string(),
+            ));
+        }
+        if group_opts.limit == 0 || group_opts.limit > 100 {
+            return Err(ApiError::InvalidArgument(
+                "groupBy.limit must be between 1 and 100".to_string(),
+            ));
+        }
+        if group_opts.group_size == 0 || group_opts.group_size > 100 {
+            return Err(ApiError::InvalidArgument(
+                "groupBy.groupSize must be between 1 and 100".to_string(),
+            ));
+        }
     }
 
     let index = crate::handlers::vectors::resolve_index(&state.pool, &index_name).await?;
@@ -132,14 +187,21 @@ pub async fn query_vectors(
         req.top_k
     };
 
+    // When grouping: over-fetch to ensure enough diverse groups
+    let fetch_k = if req.group_by.is_some() {
+        (fetch_k * 5).min(10_000)
+    } else {
+        fetch_k
+    };
+
     let top_n = req
         .rerank
         .as_ref()
         .and_then(|r| r.top_n)
         .unwrap_or(req.top_k);
 
-    // When reranking we always need metadata for the rank_field extraction
-    let need_metadata = req.include_metadata || req.rerank.is_some();
+    // When reranking or grouping we always need metadata
+    let need_metadata = req.include_metadata || req.rerank.is_some() || req.group_by.is_some();
     let values_col = if req.include_values {
         "values::text"
     } else {
@@ -248,11 +310,70 @@ pub async fn query_vectors(
             .collect();
     }
 
-    Ok(Json(QueryResponse {
+    // Apply score threshold filtering (after reranking if applicable)
+    if let Some(threshold) = req.score_threshold {
+        matches.retain(|m| m.score >= threshold);
+    }
+
+    // Grouping: bucket matches by a metadata field value
+    if let Some(group_opts) = &req.group_by {
+        let mut group_order: Vec<String> = Vec::new();
+        let mut groups: std::collections::HashMap<String, Vec<serde_json::Value>> =
+            std::collections::HashMap::new();
+
+        for m in &matches {
+            let group_key = m
+                .metadata
+                .as_ref()
+                .and_then(|meta| meta.get(&group_opts.field))
+                .map(|v| match v.as_str() {
+                    Some(s) => s.to_string(),
+                    None => v.to_string(),
+                })
+                .unwrap_or_default();
+
+            if !groups.contains_key(&group_key) {
+                group_order.push(group_key.clone());
+            }
+            let entry = groups.entry(group_key).or_default();
+            if entry.len() < group_opts.group_size {
+                let mut match_val = serde_json::json!({
+                    "id": m.id,
+                    "score": m.score,
+                });
+                if req.include_values {
+                    match_val["values"] = serde_json::json!(m.values);
+                }
+                if req.include_metadata {
+                    match_val["metadata"] = serde_json::json!(m.metadata);
+                }
+                entry.push(match_val);
+            }
+        }
+
+        let grouped: Vec<serde_json::Value> = group_order
+            .into_iter()
+            .take(group_opts.limit)
+            .map(|key| {
+                serde_json::json!({
+                    "group": key,
+                    "matches": groups.remove(&key).unwrap_or_default(),
+                })
+            })
+            .collect();
+
+        return Ok(Json(serde_json::json!({
+            "results": [],
+            "matches": grouped,
+            "namespace": namespace,
+        })));
+    }
+
+    Ok(Json(serde_json::to_value(QueryResponse {
         results: vec![],
         matches,
         namespace,
-    }))
+    }).unwrap()))
 }
 
 /// POST /indexes/:name/query/hybrid
@@ -265,6 +386,13 @@ pub async fn query_hybrid(
         return Err(ApiError::InvalidArgument(
             "topK must be between 1 and 10000".to_string(),
         ));
+    }
+    if let Some(threshold) = req.score_threshold {
+        if !(0.0..=1.0).contains(&threshold) {
+            return Err(ApiError::InvalidArgument(
+                "scoreThreshold must be between 0.0 and 1.0".to_string(),
+            ));
+        }
     }
 
     let index = crate::handlers::vectors::resolve_index(&state.pool, &index_name).await?;
@@ -330,5 +458,294 @@ pub async fn query_hybrid(
             .collect();
     }
 
+    if let Some(threshold) = req.score_threshold {
+        result.matches.retain(|m| m.score >= threshold);
+    }
+
     Ok(Json(result))
+}
+
+/// POST /indexes/:name/query/batch
+pub async fn query_batch(
+    State(state): State<AppState>,
+    axum::extract::Path(index_name): axum::extract::Path<String>,
+    Json(req): Json<BatchQueryRequest>,
+) -> Result<Json<BatchQueryResponse>, ApiError> {
+    if req.queries.is_empty() {
+        return Err(ApiError::InvalidArgument(
+            "queries array must not be empty".to_string(),
+        ));
+    }
+    if req.queries.len() > 10 {
+        return Err(ApiError::InvalidArgument(
+            "queries array cannot exceed 10 entries".to_string(),
+        ));
+    }
+
+    let mut handles = Vec::with_capacity(req.queries.len());
+    for single_req in req.queries {
+        let s = state.clone();
+        let name = index_name.clone();
+        handles.push(tokio::spawn(async move {
+            query_vectors(State(s), axum::extract::Path(name), Json(single_req)).await
+        }));
+    }
+
+    let mut results = Vec::with_capacity(handles.len());
+    for handle in handles {
+        let res = handle
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("Task join error: {e}")))?;
+        let Json(query_resp) = res?;
+        results.push(query_resp);
+    }
+
+    Ok(Json(BatchQueryResponse { results }))
+}
+
+/// Internal: execute a dense ANN query and return scored matches.
+/// Handles distance→score conversion but NOT reranking, score threshold, or grouping.
+async fn execute_ann_query(
+    pool: &sqlx::PgPool,
+    index: &crate::handlers::vectors::IndexRecord,
+    query_vec: &[f32],
+    top_k: i64,
+    namespace: &str,
+    filter: &Option<serde_json::Value>,
+    include_values: bool,
+    include_metadata: bool,
+) -> Result<Vec<Match>, ApiError> {
+    let vec_str = format!(
+        "[{}]",
+        query_vec
+            .iter()
+            .map(|f| f.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+
+    let dist_op = match index.metric.as_str() {
+        "cosine" => "<=>",
+        "euclidean" => "<->",
+        "dotproduct" => "<#>",
+        _ => "<=>",
+    };
+
+    let (filter_sql, filter_params) = if let Some(f) = filter {
+        crate::planner::filter_translator::translate_filter(f, 3)
+            .map_err(|e| ApiError::InvalidArgument(e.to_string()))?
+    } else {
+        ("TRUE".to_string(), vec![])
+    };
+
+    let values_col = if include_values {
+        "values::text"
+    } else {
+        "NULL::text AS values"
+    };
+    let metadata_col = if include_metadata {
+        "metadata"
+    } else {
+        "NULL::jsonb AS metadata"
+    };
+
+    let sql = format!(
+        r#"
+        SELECT id, {values_col}, {metadata_col},
+               values {dist_op} $1::vector AS distance
+        FROM {}.vectors
+        WHERE namespace = $2
+          AND ({filter_sql})
+        ORDER BY values {dist_op} $1::vector
+        LIMIT $3
+        "#,
+        index.schema_name
+    );
+
+    let mut query = sqlx::query(&sql)
+        .bind(&vec_str)
+        .bind(namespace)
+        .bind(top_k);
+    for p in &filter_params {
+        query = query.bind(p.as_str().unwrap_or(""));
+    }
+
+    let rows = query.fetch_all(pool).await?;
+
+    let matches = rows
+        .into_iter()
+        .map(|row| {
+            let id: String = row.get("id");
+            let distance: f64 = row.get("distance");
+            let values_str: Option<String> = row.get("values");
+            let metadata: Option<serde_json::Value> = row.get("metadata");
+
+            let score = match index.metric.as_str() {
+                "cosine" => 1.0 - distance,
+                "euclidean" => 1.0 / (1.0 + distance),
+                "dotproduct" => -distance,
+                _ => 1.0 - distance,
+            };
+
+            Match {
+                id,
+                score,
+                values: values_str.map(|s| crate::handlers::vectors::parse_pgvector_str(&s)),
+                metadata,
+            }
+        })
+        .collect();
+
+    Ok(matches)
+}
+
+// --- Recommendation API ---
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecommendRequest {
+    pub positive_ids: Vec<String>,
+    #[serde(default)]
+    pub negative_ids: Vec<String>,
+    #[serde(rename = "topK")]
+    pub top_k: i64,
+    pub namespace: Option<String>,
+    pub filter: Option<serde_json::Value>,
+    #[serde(rename = "includeValues", default)]
+    pub include_values: bool,
+    #[serde(rename = "includeMetadata", default)]
+    pub include_metadata: bool,
+    #[serde(rename = "scoreThreshold")]
+    pub score_threshold: Option<f64>,
+}
+
+#[derive(Serialize)]
+pub struct RecommendResponse {
+    pub matches: Vec<Match>,
+    pub namespace: String,
+}
+
+/// POST /indexes/:name/recommend
+pub async fn recommend(
+    State(state): State<AppState>,
+    axum::extract::Path(index_name): axum::extract::Path<String>,
+    Json(req): Json<RecommendRequest>,
+) -> Result<Json<RecommendResponse>, ApiError> {
+    if req.positive_ids.is_empty() {
+        return Err(ApiError::InvalidArgument(
+            "positiveIds must contain at least one ID".to_string(),
+        ));
+    }
+    if req.positive_ids.len() + req.negative_ids.len() > 100 {
+        return Err(ApiError::InvalidArgument(
+            "Total positive + negative IDs cannot exceed 100".to_string(),
+        ));
+    }
+    if req.top_k < 1 || req.top_k > 10_000 {
+        return Err(ApiError::InvalidArgument(
+            "topK must be between 1 and 10000".to_string(),
+        ));
+    }
+
+    let index = crate::handlers::vectors::resolve_index(&state.pool, &index_name).await?;
+    let namespace = req.namespace.clone().unwrap_or_default();
+    let schema = &index.schema_name;
+    let dim = index.dimension as usize;
+
+    // Fetch all positive and negative vectors
+    let all_ids: Vec<&str> = req
+        .positive_ids
+        .iter()
+        .chain(req.negative_ids.iter())
+        .map(|s| s.as_str())
+        .collect();
+
+    let rows = sqlx::query(&format!(
+        "SELECT id, values::text FROM {schema}.vectors WHERE namespace = $1 AND id = ANY($2::text[])"
+    ))
+    .bind(&namespace)
+    .bind(&all_ids)
+    .fetch_all(&state.pool)
+    .await?;
+
+    let mut vec_map: std::collections::HashMap<String, Vec<f32>> =
+        std::collections::HashMap::new();
+    for row in &rows {
+        let id: String = row.get("id");
+        let values_str: String = row.get("values");
+        vec_map.insert(
+            id,
+            crate::handlers::vectors::parse_pgvector_str(&values_str),
+        );
+    }
+
+    // Verify all positive IDs were found
+    for pid in &req.positive_ids {
+        if !vec_map.contains_key(pid) {
+            return Err(ApiError::NotFound(format!(
+                "Positive vector '{pid}' not found in namespace '{namespace}'."
+            )));
+        }
+    }
+
+    // Compute synthetic query vector: mean(positives) - mean(negatives)
+    let mut synthetic = vec![0.0f32; dim];
+
+    let pos_count = req.positive_ids.len() as f32;
+    for pid in &req.positive_ids {
+        let v = &vec_map[pid];
+        for (i, val) in v.iter().enumerate() {
+            if i < dim {
+                synthetic[i] += val / pos_count;
+            }
+        }
+    }
+
+    if !req.negative_ids.is_empty() {
+        let neg_count = req.negative_ids.len() as f32;
+        for nid in &req.negative_ids {
+            if let Some(v) = vec_map.get(nid) {
+                for (i, val) in v.iter().enumerate() {
+                    if i < dim {
+                        synthetic[i] -= val / neg_count;
+                    }
+                }
+            }
+        }
+    }
+
+    // Run ANN search with synthetic vector (extra results to compensate for filtering out input IDs)
+    let extra = (req.positive_ids.len() + req.negative_ids.len()) as i64;
+    let fetch_k = (req.top_k + extra).min(10_000);
+
+    let mut matches = execute_ann_query(
+        &state.pool,
+        &index,
+        &synthetic,
+        fetch_k,
+        &namespace,
+        &req.filter,
+        req.include_values,
+        req.include_metadata,
+    )
+    .await?;
+
+    // Exclude input IDs from results
+    let exclude: std::collections::HashSet<&str> = req
+        .positive_ids
+        .iter()
+        .chain(req.negative_ids.iter())
+        .map(|s| s.as_str())
+        .collect();
+    matches.retain(|m| !exclude.contains(m.id.as_str()));
+
+    // Truncate to requested top_k
+    matches.truncate(req.top_k as usize);
+
+    // Apply score threshold
+    if let Some(threshold) = req.score_threshold {
+        matches.retain(|m| m.score >= threshold);
+    }
+
+    Ok(Json(RecommendResponse { matches, namespace }))
 }

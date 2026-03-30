@@ -18,10 +18,9 @@ async fn main() {
 
     let config = config::AppConfig::from_env().expect("Failed to load configuration");
 
-    // Initialize structured JSON logging
+    // Initialize simple text logging
     tracing_subscriber::fmt()
         .with_env_filter(&config.log_level)
-        .json()
         .init();
 
     let pool = db::pool::create_pool(&config)
@@ -58,7 +57,7 @@ async fn main() {
 }
 
 fn build_public_router(state: state::AppState) -> Router {
-    use handlers::{health, indexes, namespaces, query, vectors};
+    use handlers::{aliases, health, indexes, namespaces, query, vectors};
 
     Router::new()
         // Health (exempt from auth)
@@ -99,9 +98,16 @@ fn build_public_router(state: state::AppState) -> Router {
             post(vectors::update_vector),
         )
         .route("/indexes/:name/vectors/list", get(vectors::list_vectors))
+        .route(
+            "/indexes/:name/vectors/scroll",
+            post(vectors::scroll_vectors),
+        )
+        .route("/indexes/:name/sample", post(vectors::sample_vectors))
         // Query
         .route("/indexes/:name/query", post(query::query_vectors))
         .route("/indexes/:name/query/hybrid", post(query::query_hybrid))
+        .route("/indexes/:name/query/batch", post(query::query_batch))
+        .route("/indexes/:name/recommend", post(query::recommend))
         // Namespace CRUD
         .route(
             "/indexes/:name/namespaces",
@@ -110,6 +116,15 @@ fn build_public_router(state: state::AppState) -> Router {
         .route(
             "/indexes/:name/namespaces/:ns",
             get(namespaces::describe_namespace).delete(namespaces::delete_namespace),
+        )
+        // Aliases
+        .route(
+            "/aliases",
+            get(aliases::list_aliases).post(aliases::create_alias),
+        )
+        .route(
+            "/aliases/:alias",
+            get(aliases::describe_alias).delete(aliases::delete_alias),
         )
         // Apply auth middleware to all routes
         .layer(axum::middleware::from_fn_with_state(

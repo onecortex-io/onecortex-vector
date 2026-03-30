@@ -1,15 +1,20 @@
-# OneCortex Vector
+# Onecortex Vector
 
-An open-source, self-hosted vector database built on PostgreSQL.
+High performance (⚡) vector database built in Rust (🦀) on PostgreSQL. Simple Pinecone like API with dense vector and hybrid search (🔎), plus rich metadata filtering, namespace support, and advanced retrieval features.
 
 ## Features
 
 - **Dense ANN search** — cosine, euclidean, and dot product similarity via StreamingDiskANN
 - **Hybrid search** — combine dense vector similarity with BM25 text search using Reciprocal Rank Fusion (RRF)
-- **Reranking** — plug in Cohere, Voyage, Jina, Pinecone Inference, or a self-hosted cross-encoder models to rerank results with natural language queries
+- **Reranking** — plug in Cohere, Voyage, Jina, Pinecone Inference, or a self-hosted cross-encoder to rerank results with natural language queries
 - **Metadata filtering** — rich query DSL with `$eq`, `$ne`, `$gt`, `$lt`, `$in`, `$nin`, `$and`, `$or` operators
-- **Namespaces** — isolate data within an index using scoped operations by namepspace
-- **Pinecone compatible API** — drop-in replacement for Pinecone's REST API; use existing SDKs with minimal changes
+- **Namespaces** — isolate data within an index using scoped operations by namespace
+- **Batch queries** — fan out up to 10 queries in a single request with concurrent execution
+- **Scroll & sample** — paginate over all vectors or draw a random sample, both with full filter support
+- **Score threshold** — filter results by minimum similarity score, applied after reranking
+- **GroupBy** — group nearest-neighbor results by any metadata field to avoid same-source clustering
+- **Recommendations** — find similar items from positive/negative example IDs without supplying a query vector
+- **Index aliases** — point a named alias at any index for zero-downtime swaps and A/B testing
 - **Self-hosted** — runs on your own PostgreSQL instance, no vendor lock-in
 
 ## Quick Start
@@ -95,9 +100,13 @@ All data-plane endpoints require an `Api-Key` header.
 | POST | `/indexes/:name/vectors/fetch_by_metadata` | Fetch vectors by metadata filter |
 | POST | `/indexes/:name/vectors/delete` | Delete vectors |
 | POST | `/indexes/:name/vectors/update` | Update a vector's metadata |
-| GET | `/indexes/:name/vectors/list` | List vector IDs |
+| GET | `/indexes/:name/vectors/list` | List vector IDs (IDs only) |
+| POST | `/indexes/:name/vectors/scroll` | Scroll all vectors with cursor pagination |
+| POST | `/indexes/:name/sample` | Random sample of vectors |
 | POST | `/indexes/:name/query` | Query nearest neighbors |
 | POST | `/indexes/:name/query/hybrid` | Hybrid dense + BM25 query |
+| POST | `/indexes/:name/query/batch` | Run up to 10 queries concurrently |
+| POST | `/indexes/:name/recommend` | Recommend by positive/negative example IDs |
 
 ### Namespaces
 
@@ -107,6 +116,15 @@ All data-plane endpoints require an `Api-Key` header.
 | POST | `/indexes/:name/namespaces` | Create a namespace |
 | GET | `/indexes/:name/namespaces/:ns` | Describe a namespace |
 | DELETE | `/indexes/:name/namespaces/:ns` | Delete a namespace |
+
+### Aliases
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/aliases` | Create or update an alias |
+| GET | `/aliases` | List all aliases |
+| GET | `/aliases/:alias` | Describe an alias |
+| DELETE | `/aliases/:alias` | Delete an alias |
 
 ### Health & Admin
 
@@ -181,6 +199,58 @@ To start the optional self-hosted cross-encoder:
 
 ```bash
 docker compose -f deploy/docker-compose.yml --profile reranking up -d
+```
+
+## Advanced Query Features
+
+### Score Threshold
+
+Drop results below a minimum similarity score (applied after reranking):
+
+```json
+{ "vector": [...], "topK": 10, "scoreThreshold": 0.75 }
+```
+
+### Batch Query
+
+Send up to 10 queries in one round-trip; results are returned in the same order:
+
+```bash
+curl -s -X POST http://localhost:8080/indexes/my-index/query/batch \
+  -H "Api-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"queries":[{"vector":[1,0,0],"topK":5},{"vector":[0,1,0],"topK":3}]}'
+```
+
+### GroupBy
+
+Group results by a metadata field to ensure diversity across sources:
+
+```json
+{ "vector": [...], "topK": 50, "groupBy": { "field": "document_id", "limit": 5, "groupSize": 2 } }
+```
+
+### Recommendations
+
+Find similar items from example IDs — no query vector needed:
+
+```bash
+curl -s -X POST http://localhost:8080/indexes/my-index/recommend \
+  -H "Api-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"positiveIds":["vec-1","vec-2"],"negativeIds":["vec-9"],"topK":10}'
+```
+
+### Index Aliases
+
+Aliases resolve transparently on every endpoint, enabling zero-downtime index swaps:
+
+```bash
+# Point "prod" at a new index atomically
+curl -s -X POST http://localhost:8080/aliases \
+  -H "Api-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"alias":"prod","indexName":"my-index-v2"}'
 ```
 
 ## Configuration

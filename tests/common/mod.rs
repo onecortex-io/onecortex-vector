@@ -51,7 +51,7 @@ fn build_test_router(state: onecortex_vector::state::AppState) -> axum::Router {
         routing::{delete, get, patch, post},
         Router,
     };
-    use onecortex_vector::handlers::{health, indexes, namespaces, query, vectors};
+    use onecortex_vector::handlers::{aliases, health, indexes, namespaces, query, vectors};
 
     Router::new()
         .route("/health", get(health::health))
@@ -89,8 +89,15 @@ fn build_test_router(state: onecortex_vector::state::AppState) -> axum::Router {
             post(vectors::update_vector),
         )
         .route("/indexes/:name/vectors/list", get(vectors::list_vectors))
+        .route(
+            "/indexes/:name/vectors/scroll",
+            post(vectors::scroll_vectors),
+        )
+        .route("/indexes/:name/sample", post(vectors::sample_vectors))
         .route("/indexes/:name/query", post(query::query_vectors))
         .route("/indexes/:name/query/hybrid", post(query::query_hybrid))
+        .route("/indexes/:name/query/batch", post(query::query_batch))
+        .route("/indexes/:name/recommend", post(query::recommend))
         .route(
             "/indexes/:name/namespaces",
             get(namespaces::list_namespaces).post(namespaces::create_namespace),
@@ -98,6 +105,14 @@ fn build_test_router(state: onecortex_vector::state::AppState) -> axum::Router {
         .route(
             "/indexes/:name/namespaces/:ns",
             get(namespaces::describe_namespace).delete(namespaces::delete_namespace),
+        )
+        .route(
+            "/aliases",
+            get(aliases::list_aliases).post(aliases::create_alias),
+        )
+        .route(
+            "/aliases/:alias",
+            get(aliases::describe_alias).delete(aliases::delete_alias),
         )
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

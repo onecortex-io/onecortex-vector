@@ -1,14 +1,14 @@
-# OneCortex Vector — Claude Code Context
+# Onecortex Vector — Claude Code Context
 
 ## What is this project?
 
-OneCortex Vector is an open-source, self-hosted vector database with a Pinecone-compatible REST API. It is built on PostgreSQL 18 with pgvector, pgvectorscale (StreamingDiskANN), and pg_textsearch (BM25).
+Onecortex Vector is an open-source, self-hosted vector database with a Pinecone like REST API. It is built on PostgreSQL 18 with pgvector, pgvectorscale (StreamingDiskANN), and pg_textsearch (BM25).
 
 The server is written in Rust using axum 0.7 + sqlx 0.8 + tokio. Official SDKs live in separate repos:
 - **Python**: [`onecortex-python-client`](https://github.com/onecortex-io/onecortex-python-client) (`onecortex` on PyPI)
 - **TypeScript**: [`onecortex-typescript-client`](https://github.com/onecortex-io/onecortex-typescript-client) (`@onecortex/sdk` on npm)
 
-**Current status:** Phases 0-4 complete (foundation, REST API, hybrid search, reranking).
+**Current status:** Phases 0-5 complete (foundation, REST API, hybrid search, reranking, extended features like scrolling, batching, and aliases).
 
 ---
 
@@ -24,7 +24,8 @@ onecortex-vector/
 │   ├── 0002_indexes_table.sql
 │   ├── 0003_index_stats_table.sql
 │   ├── 0004_api_keys_table.sql
-│   └── 0006_pg_textsearch.sql
+│   ├── 0006_pg_textsearch.sql
+│   └── 0007_aliases_table.sql
 ├── src/
 │   ├── main.rs                   # Router, AppState, server startup
 │   ├── lib.rs                    # Module declarations
@@ -39,6 +40,7 @@ onecortex-vector/
 │   │   ├── vectors.rs
 │   │   ├── query.rs
 │   │   ├── namespaces.rs
+│   │   ├── aliases.rs
 │   │   ├── health.rs
 │   │   └── admin.rs
 │   ├── middleware/
@@ -55,7 +57,8 @@ onecortex-vector/
 │   ├── foundation.rs
 │   ├── hybrid_test.rs
 │   ├── query_tests.rs
-│   └── reranking_test.rs
+│   ├── reranking_test.rs
+│   └── alias_tests.rs
 └── deploy/
     ├── Dockerfile                # Builds PG18 + pgvector + pgvectorscale + pg_textsearch
     ├── docker-compose.yml        # Development environment
@@ -118,7 +121,7 @@ ONECORTEX_VECTOR_API_PORT             8080 (public)
 ONECORTEX_VECTOR_ADMIN_PORT           9090 (admin/metrics)
 ONECORTEX_VECTOR_MAX_CONNS            50
 ONECORTEX_VECTOR_DEFAULT_DISKANN_NEIGHBORS  50
-ONECORTEX_VECTOR_LOG_LEVEL            info
+ONECORTEX_VECTOR_LOG_LEVEL            info     # Uses simple text logs
 ONECORTEX_VECTOR_ENABLE_RLS           false
 ONECORTEX_VECTOR_RERANK_BACKEND       none | cohere | voyage | jina | pinecone | cross-encoder
 ```

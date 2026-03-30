@@ -332,7 +332,7 @@ async fn update_metadata() {
     let resp = client
         .post(format!("{}/indexes/{name}/vectors/update", server.base_url))
         .header("Api-Key", &server.api_key)
-        .json(&json!({ "id": "v1", "set_metadata": {"b": 2} }))
+        .json(&json!({ "id": "v1", "setMetadata": {"b": 2} }))
         .send()
         .await
         .unwrap();
@@ -438,6 +438,224 @@ async fn list_vectors_pagination() {
     let body: serde_json::Value = resp.json().await.unwrap();
     let vectors = body["vectors"].as_array().unwrap();
     assert_eq!(vectors.len(), 1);
+
+    common::cleanup_index(&server, &name).await;
+}
+
+#[tokio::test]
+async fn scroll_returns_full_vector_data() {
+    let server = common::start_test_server().await;
+    let name = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    client
+        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({
+            "vectors": [
+                {"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"color": "red"}},
+                {"id": "v2", "values": [0.0, 1.0, 0.0], "metadata": {"color": "blue"}},
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    let resp = client
+        .post(format!("{}/indexes/{name}/vectors/scroll", server.base_url))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({
+            "includeValues": true,
+            "includeMetadata": true
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let vectors = body["vectors"].as_array().unwrap();
+    assert_eq!(vectors.len(), 2);
+    // Verify values and metadata are present
+    assert!(vectors[0]["values"].is_array());
+    assert!(vectors[0]["metadata"].is_object());
+
+    common::cleanup_index(&server, &name).await;
+}
+
+#[tokio::test]
+async fn scroll_pagination_with_cursor() {
+    let server = common::start_test_server().await;
+    let name = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    // Upsert 5 vectors with predictable IDs (alphabetical ordering matters for cursor)
+    let vectors: Vec<serde_json::Value> = (1..=5)
+        .map(|i| json!({"id": format!("v{i}"), "values": [1.0, 0.0, 0.0]}))
+        .collect();
+    client
+        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({"vectors": vectors}))
+        .send()
+        .await
+        .unwrap();
+
+    // Page 1: limit=2
+    let resp = client
+        .post(format!("{}/indexes/{name}/vectors/scroll", server.base_url))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({"limit": 2}))
+        .send()
+        .await
+        .unwrap();
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["vectors"].as_array().unwrap().len(), 2);
+    assert!(body["nextCursor"].is_string());
+
+    // Page 2: use cursor
+    let cursor = body["nextCursor"].as_str().unwrap();
+    let resp = client
+        .post(format!("{}/indexes/{name}/vectors/scroll", server.base_url))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({"limit": 2, "cursor": cursor}))
+        .send()
+        .await
+        .unwrap();
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["vectors"].as_array().unwrap().len(), 2);
+
+    // Page 3: last page — 1 vector remains, no nextCursor
+    let cursor = body["nextCursor"].as_str().unwrap();
+    let resp = client
+        .post(format!("{}/indexes/{name}/vectors/scroll", server.base_url))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({"limit": 2, "cursor": cursor}))
+        .send()
+        .await
+        .unwrap();
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["vectors"].as_array().unwrap().len(), 1);
+    assert!(body["nextCursor"].is_null() || body.get("nextCursor").is_none());
+
+    common::cleanup_index(&server, &name).await;
+}
+
+#[tokio::test]
+async fn scroll_with_filter() {
+    let server = common::start_test_server().await;
+    let name = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    client
+        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({
+            "vectors": [
+                {"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"status": "active"}},
+                {"id": "v2", "values": [0.0, 1.0, 0.0], "metadata": {"status": "archived"}},
+                {"id": "v3", "values": [0.0, 0.0, 1.0], "metadata": {"status": "active"}},
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    let resp = client
+        .post(format!("{}/indexes/{name}/vectors/scroll", server.base_url))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({
+            "filter": {"status": {"$eq": "active"}},
+            "includeMetadata": true
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let vectors = body["vectors"].as_array().unwrap();
+    assert_eq!(vectors.len(), 2);
+    for v in vectors {
+        assert_eq!(v["metadata"]["status"], "active");
+    }
+
+    common::cleanup_index(&server, &name).await;
+}
+
+#[tokio::test]
+async fn sample_returns_random_vectors() {
+    let server = common::start_test_server().await;
+    let name = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    let vectors: Vec<serde_json::Value> = (1..=20)
+        .map(|i| json!({"id": format!("v{i}"), "values": [1.0, 0.0, 0.0]}))
+        .collect();
+    client
+        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({"vectors": vectors}))
+        .send()
+        .await
+        .unwrap();
+
+    let resp = client
+        .post(format!("{}/indexes/{name}/sample", server.base_url))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({"size": 5, "includeMetadata": true}))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let vectors = body["vectors"].as_array().unwrap();
+    assert!(vectors.len() <= 5);
+    assert!(!vectors.is_empty());
+
+    common::cleanup_index(&server, &name).await;
+}
+
+#[tokio::test]
+async fn sample_with_filter() {
+    let server = common::start_test_server().await;
+    let name = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    client
+        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({
+            "vectors": [
+                {"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"type": "a"}},
+                {"id": "v2", "values": [0.0, 1.0, 0.0], "metadata": {"type": "b"}},
+                {"id": "v3", "values": [0.0, 0.0, 1.0], "metadata": {"type": "a"}},
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    let resp = client
+        .post(format!("{}/indexes/{name}/sample", server.base_url))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({
+            "size": 10,
+            "filter": {"type": {"$eq": "a"}},
+            "includeMetadata": true
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let vectors = body["vectors"].as_array().unwrap();
+    assert_eq!(vectors.len(), 2);
+    for v in vectors {
+        assert_eq!(v["metadata"]["type"], "a");
+    }
 
     common::cleanup_index(&server, &name).await;
 }
