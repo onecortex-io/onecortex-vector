@@ -1,16 +1,16 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// Create the schema, vectors table, and all indexes for a new user index.
+/// Create the schema, records table, and all indexes for a new collection.
 ///
-/// Called synchronously during POST /indexes. On an empty table, all DDL
+/// Called synchronously during POST /collections. On an empty table, all DDL
 /// including DiskANN index creation is instantaneous.
 ///
-/// Schema name format: "idx_{uuid_simple}" e.g. "idx_550e8400e29b41d4a7160446"
+/// Schema name format: "col_{uuid_simple}" e.g. "col_550e8400e29b41d4a7160446"
 #[allow(clippy::too_many_arguments)]
-pub async fn create_index_schema(
+pub async fn create_collection_schema(
     pool: &PgPool,
-    index_id: Uuid,
+    collection_id: Uuid,
     schema_name: &str,
     dimension: i32,
     metric: &str,
@@ -40,7 +40,7 @@ pub async fn create_index_schema(
     // NOTE: sparse_values column is NOT present — see docs/implementation/00-reference.md §8.
     let create_table = format!(
         r#"
-        CREATE TABLE {schema_name}.vectors (
+        CREATE TABLE {schema_name}.records (
             id           TEXT        NOT NULL CHECK (char_length(id) <= 512),
             namespace    TEXT        NOT NULL DEFAULT '',
             values       VECTOR({dimension}),
@@ -59,7 +59,7 @@ pub async fn create_index_schema(
     let create_diskann = format!(
         r#"
         CREATE INDEX {schema_name}_diskann_idx
-            ON {schema_name}.vectors
+            ON {schema_name}.records
             USING diskann (values {ops_class})
             WITH (
                 num_neighbors    = {diskann_neighbors},
@@ -72,7 +72,7 @@ pub async fn create_index_schema(
     let create_gin = format!(
         r#"
         CREATE INDEX {schema_name}_metadata_gin_idx
-            ON {schema_name}.vectors
+            ON {schema_name}.records
             USING GIN (metadata jsonb_path_ops)
     "#
     );
@@ -81,7 +81,7 @@ pub async fn create_index_schema(
     let create_ns_idx = format!(
         r#"
         CREATE INDEX {schema_name}_namespace_idx
-            ON {schema_name}.vectors (namespace)
+            ON {schema_name}.records (namespace)
     "#
     );
 
@@ -102,7 +102,7 @@ pub async fn create_index_schema(
         let create_bm25 = format!(
             r#"
             CREATE INDEX {schema_name}_bm25_idx
-                ON {schema_name}.vectors
+                ON {schema_name}.records
                 USING bm25 (text_content)
                 WITH (text_config = 'english')
             "#
@@ -110,34 +110,34 @@ pub async fn create_index_schema(
         sqlx::query(&create_bm25).execute(&mut *tx).await?;
     }
 
-    // Mark index as ready
+    // Mark collection as ready
     sqlx::query(
-        "UPDATE _onecortex_vector.indexes SET status = 'ready', updated_at = now() WHERE id = $1",
+        "UPDATE _onecortex_vector.collections SET status = 'ready', updated_at = now() WHERE id = $1",
     )
-    .bind(index_id)
+    .bind(collection_id)
     .execute(&mut *tx)
     .await?;
 
     tx.commit().await?;
 
     tracing::info!(
-        index_id = %index_id,
+        collection_id = %collection_id,
         schema_name,
         dimension,
         metric,
-        "Index schema created successfully"
+        "Collection schema created successfully"
     );
 
     Ok(())
 }
 
-/// Drop the schema for a user index, removing all vectors and indexes.
+/// Drop the schema for a collection, removing all records and indexes.
 ///
-/// Called during DELETE /indexes/:name after setting status = 'deleting'.
+/// Called during DELETE /collections/:name after setting status = 'deleting'.
 /// DROP SCHEMA CASCADE removes all tables and indexes in the schema.
-pub async fn drop_index_schema(
+pub async fn drop_collection_schema(
     pool: &PgPool,
-    index_id: Uuid,
+    collection_id: Uuid,
     schema_name: &str,
 ) -> Result<(), sqlx::Error> {
     let drop_schema = format!("DROP SCHEMA IF EXISTS {schema_name} CASCADE");
@@ -146,25 +146,25 @@ pub async fn drop_index_schema(
 
     sqlx::query(&drop_schema).execute(&mut *tx).await?;
 
-    sqlx::query("DELETE FROM _onecortex_vector.indexes WHERE id = $1")
-        .bind(index_id)
+    sqlx::query("DELETE FROM _onecortex_vector.collections WHERE id = $1")
+        .bind(collection_id)
         .execute(&mut *tx)
         .await?;
 
     tx.commit().await?;
 
-    tracing::info!(index_id = %index_id, schema_name, "Index schema dropped");
+    tracing::info!(collection_id = %collection_id, schema_name, "Collection schema dropped");
     Ok(())
 }
 
 /// Generate a schema name from a UUID.
-/// Format: "idx_{uuid_simple}" — UUID without hyphens, lowercase.
-pub fn schema_name_for(index_id: Uuid) -> String {
-    format!("idx_{}", index_id.simple())
+/// Format: "col_{uuid_simple}" — UUID without hyphens, lowercase.
+pub fn schema_name_for(collection_id: Uuid) -> String {
+    format!("col_{}", collection_id.simple())
 }
 
 /// Builds (or rebuilds) the BM25 index on an existing schema.
-/// Called when PATCH /indexes/:name sets bm25_enabled=true on an existing index.
+/// Called when PATCH /collections/:name sets bm25_enabled=true on an existing collection.
 pub async fn build_bm25_index(pool: &PgPool, schema_name: &str) -> Result<(), sqlx::Error> {
     // DROP first in case a partial index exists from a previous failed attempt.
     sqlx::query(&format!(
@@ -176,7 +176,7 @@ pub async fn build_bm25_index(pool: &PgPool, schema_name: &str) -> Result<(), sq
     sqlx::query(&format!(
         r#"
         CREATE INDEX {schema_name}_bm25_idx
-            ON {schema_name}.vectors
+            ON {schema_name}.records
             USING bm25 (text_content)
             WITH (text_config = 'english')
         "#

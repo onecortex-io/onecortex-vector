@@ -12,7 +12,7 @@ pub struct RerankOptions {
     /// Number of final results after reranking. Defaults to topK.
     pub top_n: Option<i64>,
     /// Which metadata field contains the text to rank against.
-    /// Default: "text". Falls back to vector id if the field is absent.
+    /// Default: "text". Falls back to record id if the field is absent.
     #[serde(default = "default_rank_field")]
     pub rank_field: String,
     /// Per-request model override. If set, uses this model instead of the server-side default.
@@ -88,10 +88,10 @@ pub struct BatchQueryResponse {
     pub results: Vec<serde_json::Value>,
 }
 
-/// POST /indexes/:name/query
+/// POST /collections/:name/query
 pub async fn query_vectors(
     State(state): State<AppState>,
-    axum::extract::Path(index_name): axum::extract::Path<String>,
+    axum::extract::Path(collection_name): axum::extract::Path<String>,
     Json(req): Json<QueryRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     if req.top_k < 1 || req.top_k > 10_000 {
@@ -124,7 +124,8 @@ pub async fn query_vectors(
         }
     }
 
-    let index = crate::handlers::vectors::resolve_index(&state.pool, &index_name).await?;
+    let collection =
+        crate::handlers::records::resolve_collection(&state.pool, &collection_name).await?;
     let namespace = req.namespace.clone().unwrap_or_default();
 
     // Resolve query vector -- either directly provided or looked up by ID
@@ -132,15 +133,15 @@ pub async fn query_vectors(
         vec.clone()
     } else if let Some(id) = &req.id {
         let row = sqlx::query(&format!(
-            "SELECT values::text FROM {}.vectors WHERE id = $1 AND namespace = $2",
-            index.schema_name
+            "SELECT values::text FROM {}.records WHERE id = $1 AND namespace = $2",
+            collection.schema_name
         ))
         .bind(id)
         .bind(&namespace)
         .fetch_optional(&state.pool)
         .await?
-        .ok_or_else(|| ApiError::NotFound(format!("Vector '{id}' not found.")))?;
-        crate::handlers::vectors::parse_pgvector_str(&row.get::<String, _>("values"))
+        .ok_or_else(|| ApiError::NotFound(format!("Record '{id}' not found.")))?;
+        crate::handlers::records::parse_pgvector_str(&row.get::<String, _>("values"))
     } else {
         return Err(ApiError::InvalidArgument(
             "Provide either 'vector' or 'id'".to_string(),
@@ -158,7 +159,7 @@ pub async fn query_vectors(
     );
 
     // Select the distance operator based on metric -- see 00-reference.md section 4 and 5
-    let dist_op = match index.metric.as_str() {
+    let dist_op = match collection.metric.as_str() {
         "cosine" => "<=>",
         "euclidean" => "<->",
         "dotproduct" => "<#>",
@@ -219,13 +220,13 @@ pub async fn query_vectors(
         r#"
         SELECT id, {values_col}, {metadata_col},
                values {dist_op} $1::vector AS distance
-        FROM {}.vectors
+        FROM {}.records
         WHERE namespace = $2
           AND ({filter_sql})
         ORDER BY values {dist_op} $1::vector
         LIMIT $3
         "#,
-        index.schema_name
+        collection.schema_name
     );
 
     let mut query = sqlx::query(&sql)
@@ -247,7 +248,7 @@ pub async fn query_vectors(
             let values_str: Option<String> = row.get("values");
             let metadata: Option<serde_json::Value> = row.get("metadata");
 
-            let score = match index.metric.as_str() {
+            let score = match collection.metric.as_str() {
                 "cosine" => 1.0 - distance,
                 "euclidean" => 1.0 / (1.0 + distance),
                 "dotproduct" => -distance,
@@ -257,7 +258,8 @@ pub async fn query_vectors(
             Match {
                 id,
                 score,
-                values: values_str.map(|s| crate::handlers::vectors::parse_pgvector_str(&s)),
+                values: values_str
+                    .map(|s| crate::handlers::records::parse_pgvector_str(&s)),
                 metadata,
             }
         })
@@ -369,17 +371,20 @@ pub async fn query_vectors(
         })));
     }
 
-    Ok(Json(serde_json::to_value(QueryResponse {
-        results: vec![],
-        matches,
-        namespace,
-    }).unwrap()))
+    Ok(Json(
+        serde_json::to_value(QueryResponse {
+            results: vec![],
+            matches,
+            namespace,
+        })
+        .unwrap(),
+    ))
 }
 
-/// POST /indexes/:name/query/hybrid
+/// POST /collections/:name/query/hybrid
 pub async fn query_hybrid(
     State(state): State<AppState>,
-    axum::extract::Path(index_name): axum::extract::Path<String>,
+    axum::extract::Path(collection_name): axum::extract::Path<String>,
     Json(req): Json<crate::planner::hybrid::HybridQueryRequest>,
 ) -> Result<Json<crate::planner::hybrid::HybridQueryResponse>, ApiError> {
     if req.top_k < 1 || req.top_k > 10_000 {
@@ -395,19 +400,24 @@ pub async fn query_hybrid(
         }
     }
 
-    let index = crate::handlers::vectors::resolve_index(&state.pool, &index_name).await?;
+    let collection =
+        crate::handlers::records::resolve_collection(&state.pool, &collection_name).await?;
 
-    if !index.bm25_enabled {
+    if !collection.bm25_enabled {
         return Err(ApiError::InvalidArgument(
-            "Hybrid search requires bm25_enabled=true on this index. \
-             Use PATCH /indexes/:name to enable it."
+            "Hybrid search requires bm25_enabled=true on this collection. \
+             Use PATCH /collections/:name to enable it."
                 .to_string(),
         ));
     }
 
-    let mut result =
-        crate::planner::hybrid::hybrid_query(&state.pool, &index.schema_name, &req, &index.metric)
-            .await?;
+    let mut result = crate::planner::hybrid::hybrid_query(
+        &state.pool,
+        &collection.schema_name,
+        &req,
+        &collection.metric,
+    )
+    .await?;
 
     // Apply reranking if requested.
     if let Some(rerank_opts) = &req.rerank {
@@ -465,10 +475,10 @@ pub async fn query_hybrid(
     Ok(Json(result))
 }
 
-/// POST /indexes/:name/query/batch
+/// POST /collections/:name/query/batch
 pub async fn query_batch(
     State(state): State<AppState>,
-    axum::extract::Path(index_name): axum::extract::Path<String>,
+    axum::extract::Path(collection_name): axum::extract::Path<String>,
     Json(req): Json<BatchQueryRequest>,
 ) -> Result<Json<BatchQueryResponse>, ApiError> {
     if req.queries.is_empty() {
@@ -485,7 +495,7 @@ pub async fn query_batch(
     let mut handles = Vec::with_capacity(req.queries.len());
     for single_req in req.queries {
         let s = state.clone();
-        let name = index_name.clone();
+        let name = collection_name.clone();
         handles.push(tokio::spawn(async move {
             query_vectors(State(s), axum::extract::Path(name), Json(single_req)).await
         }));
@@ -507,7 +517,7 @@ pub async fn query_batch(
 /// Handles distance→score conversion but NOT reranking, score threshold, or grouping.
 async fn execute_ann_query(
     pool: &sqlx::PgPool,
-    index: &crate::handlers::vectors::IndexRecord,
+    collection: &crate::handlers::records::CollectionMeta,
     query_vec: &[f32],
     top_k: i64,
     namespace: &str,
@@ -524,7 +534,7 @@ async fn execute_ann_query(
             .join(",")
     );
 
-    let dist_op = match index.metric.as_str() {
+    let dist_op = match collection.metric.as_str() {
         "cosine" => "<=>",
         "euclidean" => "<->",
         "dotproduct" => "<#>",
@@ -553,13 +563,13 @@ async fn execute_ann_query(
         r#"
         SELECT id, {values_col}, {metadata_col},
                values {dist_op} $1::vector AS distance
-        FROM {}.vectors
+        FROM {}.records
         WHERE namespace = $2
           AND ({filter_sql})
         ORDER BY values {dist_op} $1::vector
         LIMIT $3
         "#,
-        index.schema_name
+        collection.schema_name
     );
 
     let mut query = sqlx::query(&sql)
@@ -580,7 +590,7 @@ async fn execute_ann_query(
             let values_str: Option<String> = row.get("values");
             let metadata: Option<serde_json::Value> = row.get("metadata");
 
-            let score = match index.metric.as_str() {
+            let score = match collection.metric.as_str() {
                 "cosine" => 1.0 - distance,
                 "euclidean" => 1.0 / (1.0 + distance),
                 "dotproduct" => -distance,
@@ -590,7 +600,8 @@ async fn execute_ann_query(
             Match {
                 id,
                 score,
-                values: values_str.map(|s| crate::handlers::vectors::parse_pgvector_str(&s)),
+                values: values_str
+                    .map(|s| crate::handlers::records::parse_pgvector_str(&s)),
                 metadata,
             }
         })
@@ -625,10 +636,10 @@ pub struct RecommendResponse {
     pub namespace: String,
 }
 
-/// POST /indexes/:name/recommend
+/// POST /collections/:name/recommend
 pub async fn recommend(
     State(state): State<AppState>,
-    axum::extract::Path(index_name): axum::extract::Path<String>,
+    axum::extract::Path(collection_name): axum::extract::Path<String>,
     Json(req): Json<RecommendRequest>,
 ) -> Result<Json<RecommendResponse>, ApiError> {
     if req.positive_ids.is_empty() {
@@ -647,10 +658,11 @@ pub async fn recommend(
         ));
     }
 
-    let index = crate::handlers::vectors::resolve_index(&state.pool, &index_name).await?;
+    let collection =
+        crate::handlers::records::resolve_collection(&state.pool, &collection_name).await?;
     let namespace = req.namespace.clone().unwrap_or_default();
-    let schema = &index.schema_name;
-    let dim = index.dimension as usize;
+    let schema = &collection.schema_name;
+    let dim = collection.dimension as usize;
 
     // Fetch all positive and negative vectors
     let all_ids: Vec<&str> = req
@@ -661,7 +673,7 @@ pub async fn recommend(
         .collect();
 
     let rows = sqlx::query(&format!(
-        "SELECT id, values::text FROM {schema}.vectors WHERE namespace = $1 AND id = ANY($2::text[])"
+        "SELECT id, values::text FROM {schema}.records WHERE namespace = $1 AND id = ANY($2::text[])"
     ))
     .bind(&namespace)
     .bind(&all_ids)
@@ -675,7 +687,7 @@ pub async fn recommend(
         let values_str: String = row.get("values");
         vec_map.insert(
             id,
-            crate::handlers::vectors::parse_pgvector_str(&values_str),
+            crate::handlers::records::parse_pgvector_str(&values_str),
         );
     }
 
@@ -683,7 +695,7 @@ pub async fn recommend(
     for pid in &req.positive_ids {
         if !vec_map.contains_key(pid) {
             return Err(ApiError::NotFound(format!(
-                "Positive vector '{pid}' not found in namespace '{namespace}'."
+                "Positive record '{pid}' not found in namespace '{namespace}'."
             )));
         }
     }
@@ -720,7 +732,7 @@ pub async fn recommend(
 
     let mut matches = execute_ann_query(
         &state.pool,
-        &index,
+        &collection,
         &synthetic,
         fetch_k,
         &namespace,

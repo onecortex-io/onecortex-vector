@@ -3,7 +3,7 @@ use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
-pub struct IndexRecord {
+pub struct CollectionMeta {
     pub id: uuid::Uuid,
     pub schema_name: String,
     pub dimension: i32,
@@ -11,18 +11,21 @@ pub struct IndexRecord {
     pub bm25_enabled: bool,
 }
 
-pub async fn resolve_index(pool: &sqlx::PgPool, name: &str) -> Result<IndexRecord, ApiError> {
-    // Try direct index lookup first
+pub async fn resolve_collection(
+    pool: &sqlx::PgPool,
+    name: &str,
+) -> Result<CollectionMeta, ApiError> {
+    // Try direct collection lookup first
     let row = sqlx::query(
         "SELECT id, schema_name, dimension, metric, bm25_enabled \
-         FROM _onecortex_vector.indexes WHERE name = $1 AND status = 'ready'",
+         FROM _onecortex_vector.collections WHERE name = $1 AND status = 'ready'",
     )
     .bind(name)
     .fetch_optional(pool)
     .await?;
 
     if let Some(row) = row {
-        return Ok(IndexRecord {
+        return Ok(CollectionMeta {
             id: row.get("id"),
             schema_name: row.get("schema_name"),
             dimension: row.get("dimension"),
@@ -31,21 +34,23 @@ pub async fn resolve_index(pool: &sqlx::PgPool, name: &str) -> Result<IndexRecor
         });
     }
 
-    // Fall back to alias resolution: alias -> index_name -> index record
+    // Fall back to alias resolution: alias -> collection_name -> collection record
     let alias_row = sqlx::query(
         "SELECT i.id, i.schema_name, i.dimension, i.metric, i.bm25_enabled \
          FROM _onecortex_vector.aliases a \
-         JOIN _onecortex_vector.indexes i ON a.index_name = i.name \
+         JOIN _onecortex_vector.collections i ON a.collection_name = i.name \
          WHERE a.alias = $1 AND i.status = 'ready'",
     )
     .bind(name)
     .fetch_optional(pool)
     .await?
     .ok_or_else(|| {
-        ApiError::NotFound(format!("Index '{name}' does not exist or is not ready."))
+        ApiError::NotFound(format!(
+            "Collection '{name}' does not exist or is not ready."
+        ))
     })?;
 
-    Ok(IndexRecord {
+    Ok(CollectionMeta {
         id: alias_row.get("id"),
         schema_name: alias_row.get("schema_name"),
         dimension: alias_row.get("dimension"),
@@ -58,12 +63,12 @@ pub async fn resolve_index(pool: &sqlx::PgPool, name: &str) -> Result<IndexRecor
 
 #[derive(Deserialize)]
 pub struct UpsertRequest {
-    pub vectors: Vec<VectorInput>,
+    pub records: Vec<RecordInput>,
     pub namespace: Option<String>,
 }
 
 #[derive(Deserialize)]
-pub struct VectorInput {
+pub struct RecordInput {
     pub id: String,
     pub values: Vec<f32>,
     /// Accepted but silently dropped -- see 00-reference.md section 8
@@ -80,72 +85,72 @@ pub struct UpsertResponse {
     pub upserted_count: i64,
 }
 
-/// POST /indexes/:name/vectors/upsert
-pub async fn upsert_vectors(
+/// POST /collections/:name/records/upsert
+pub async fn upsert_records(
     State(state): State<AppState>,
-    axum::extract::Path(index_name): axum::extract::Path<String>,
+    axum::extract::Path(collection_name): axum::extract::Path<String>,
     Json(req): Json<UpsertRequest>,
 ) -> Result<Json<UpsertResponse>, ApiError> {
-    if req.vectors.len() > 1000 {
+    if req.records.len() > 1000 {
         return Err(ApiError::InvalidArgument(
-            "upsert batch cannot exceed 1000 vectors".to_string(),
+            "upsert batch cannot exceed 1000 records".to_string(),
         ));
     }
-    if req.vectors.is_empty() {
+    if req.records.is_empty() {
         return Ok(Json(UpsertResponse { upserted_count: 0 }));
     }
 
-    let index = resolve_index(&state.pool, &index_name).await?;
+    let collection = resolve_collection(&state.pool, &collection_name).await?;
     let namespace = req.namespace.unwrap_or_default();
 
     // Validate all IDs and dimensions before any DB writes
-    for v in &req.vectors {
-        if v.id.len() > 512 {
+    for r in &req.records {
+        if r.id.len() > 512 {
             return Err(ApiError::InvalidArgument(format!(
-                "vector id '{}...' exceeds 512 character limit",
-                &v.id[..20.min(v.id.len())]
+                "record id '{}...' exceeds 512 character limit",
+                &r.id[..20.min(r.id.len())]
             )));
         }
-        if v.values.len() != index.dimension as usize {
+        if r.values.len() != collection.dimension as usize {
             return Err(ApiError::InvalidArgument(format!(
-                "vector '{}' has {} dimensions but index expects {}",
-                v.id,
-                v.values.len(),
-                index.dimension
+                "record '{}' has {} dimensions but collection expects {}",
+                r.id,
+                r.values.len(),
+                collection.dimension
             )));
         }
-        if v.sparse_values.is_some() {
+        if r.sparse_values.is_some() {
             tracing::warn!(
-                vector_id = %v.id,
-                "received sparseValues for vector; sparse vectors are not supported and will be silently ignored"
+                record_id = %r.id,
+                "received sparseValues for record; sparse vectors are not supported and will be silently ignored"
             );
         }
     }
 
-    let schema = &index.schema_name;
+    let schema = &collection.schema_name;
     let upsert_sql = format!(
-        "INSERT INTO {schema}.vectors (id, namespace, values, text_content, metadata, updated_at) VALUES "
+        "INSERT INTO {schema}.records (id, namespace, values, text_content, metadata, updated_at) VALUES "
     );
 
     let mut qb = sqlx::QueryBuilder::new(upsert_sql);
     let mut sep = qb.separated(", ");
-    for v in &req.vectors {
+    for r in &req.records {
         let embedding_str = format!(
             "[{}]",
-            v.values
+            r.values
                 .iter()
                 .map(|f| f.to_string())
                 .collect::<Vec<_>>()
                 .join(",")
         );
         sep.push("(");
-        sep.push_bind_unseparated(&v.id);
+        sep.push_bind_unseparated(&r.id);
         sep.push_unseparated(", ");
         sep.push_bind_unseparated(&namespace);
         sep.push_unseparated(format!(", '{embedding_str}'::vector, "));
-        sep.push_bind_unseparated(v.text.as_deref());
+        sep.push_bind_unseparated(r.text.as_deref());
         sep.push_unseparated(", ");
-        sep.push_bind_unseparated(&v.metadata);
+        sep.push_bind_unseparated(&r.metadata);
         sep.push_unseparated(", now())");
     }
 
@@ -159,28 +164,28 @@ pub async fn upsert_vectors(
 
     qb.build().execute(&state.pool).await?;
 
-    let count = req.vectors.len() as i64;
+    let count = req.records.len() as i64;
 
     // Async stats update -- fire and forget, non-blocking
     let pool = state.pool.clone();
-    let index_id = index.id;
+    let collection_id = collection.id;
     let ns = namespace.clone();
     let schema_clone = schema.clone();
     tokio::spawn(async move {
         let result = sqlx::query(&format!(
             r#"
-            INSERT INTO _onecortex_vector.index_stats (index_id, namespace, vector_count)
-            SELECT $1, $2, COUNT(*) FROM {schema_clone}.vectors WHERE namespace = $2
-            ON CONFLICT (index_id, namespace)
-            DO UPDATE SET vector_count = EXCLUDED.vector_count, updated_at = now()
+            INSERT INTO _onecortex_vector.collection_stats (collection_id, namespace, record_count)
+            SELECT $1, $2, COUNT(*) FROM {schema_clone}.records WHERE namespace = $2
+            ON CONFLICT (collection_id, namespace)
+            DO UPDATE SET record_count = EXCLUDED.record_count, updated_at = now()
             "#
         ))
-        .bind(index_id)
+        .bind(collection_id)
         .bind(&ns)
         .execute(&pool)
         .await;
         if let Err(e) = result {
-            tracing::warn!(error = %e, "Failed to update index stats");
+            tracing::warn!(error = %e, "Failed to update collection stats");
         }
     });
 
@@ -197,10 +202,10 @@ pub struct FetchRequest {
     pub namespace: Option<String>,
 }
 
-/// POST /indexes/:name/vectors/fetch
-pub async fn fetch_vectors(
+/// POST /collections/:name/records/fetch
+pub async fn fetch_records(
     State(state): State<AppState>,
-    axum::extract::Path(index_name): axum::extract::Path<String>,
+    axum::extract::Path(collection_name): axum::extract::Path<String>,
     Json(req): Json<FetchRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     if req.ids.len() > 1000 {
@@ -208,26 +213,26 @@ pub async fn fetch_vectors(
             "ids array cannot exceed 1000 entries".to_string(),
         ));
     }
-    let index = resolve_index(&state.pool, &index_name).await?;
+    let collection = resolve_collection(&state.pool, &collection_name).await?;
     let namespace = req.namespace.unwrap_or_default();
 
     let rows = sqlx::query(&format!(
-        "SELECT id, values::text, metadata FROM {}.vectors WHERE namespace = $1 AND id = ANY($2::text[])",
-        index.schema_name
+        "SELECT id, values::text, metadata FROM {}.records WHERE namespace = $1 AND id = ANY($2::text[])",
+        collection.schema_name
     ))
     .bind(&namespace)
     .bind(&req.ids)
     .fetch_all(&state.pool)
     .await?;
 
-    let mut vectors = serde_json::Map::new();
+    let mut records = serde_json::Map::new();
     for row in rows {
         let id: String = row.get("id");
         let values_str: Option<String> = row.get("values");
         let metadata: Option<serde_json::Value> = row.get("metadata");
 
         let values: Option<Vec<f32>> = values_str.map(|s| parse_pgvector_str(&s));
-        vectors.insert(
+        records.insert(
             id.clone(),
             serde_json::json!({
                 "id": id,
@@ -238,7 +243,7 @@ pub async fn fetch_vectors(
     }
 
     Ok(Json(serde_json::json!({
-        "vectors": vectors,
+        "records": records,
         "namespace": namespace,
     })))
 }
@@ -255,13 +260,13 @@ pub struct FetchByMetadataRequest {
     pub include_metadata: Option<bool>,
 }
 
-/// POST /indexes/:name/vectors/fetch_by_metadata
+/// POST /collections/:name/records/fetch_by_metadata
 pub async fn fetch_by_metadata(
     State(state): State<AppState>,
-    axum::extract::Path(index_name): axum::extract::Path<String>,
+    axum::extract::Path(collection_name): axum::extract::Path<String>,
     Json(req): Json<FetchByMetadataRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let index = resolve_index(&state.pool, &index_name).await?;
+    let collection = resolve_collection(&state.pool, &collection_name).await?;
     let namespace = req.namespace.unwrap_or_default();
     let limit = req.limit.unwrap_or(100).min(1000);
 
@@ -277,8 +282,8 @@ pub async fn fetch_by_metadata(
     };
 
     let sql = format!(
-        "SELECT id, {values_col}, metadata FROM {}.vectors WHERE namespace = $1 AND ({filter_sql}) LIMIT {limit}",
-        index.schema_name
+        "SELECT id, {values_col}, metadata FROM {}.records WHERE namespace = $1 AND ({filter_sql}) LIMIT {limit}",
+        collection.schema_name
     );
 
     let mut query = sqlx::query(&sql).bind(&namespace);
@@ -288,7 +293,7 @@ pub async fn fetch_by_metadata(
 
     let rows = query.fetch_all(&state.pool).await?;
 
-    let vectors: Vec<serde_json::Value> = rows.into_iter().map(|row| {
+    let records: Vec<serde_json::Value> = rows.into_iter().map(|row| {
         let id: String = row.get("id");
         let values_str: Option<String> = row.get("values");
         let metadata: Option<serde_json::Value> = row.get("metadata");
@@ -301,7 +306,7 @@ pub async fn fetch_by_metadata(
     }).collect();
 
     Ok(Json(
-        serde_json::json!({ "vectors": vectors, "namespace": namespace }),
+        serde_json::json!({ "records": records, "namespace": namespace }),
     ))
 }
 
@@ -316,19 +321,19 @@ pub struct DeleteRequest {
     pub namespace: Option<String>,
 }
 
-/// POST /indexes/:name/vectors/delete
-pub async fn delete_vectors(
+/// POST /collections/:name/records/delete
+pub async fn delete_records(
     State(state): State<AppState>,
-    axum::extract::Path(index_name): axum::extract::Path<String>,
+    axum::extract::Path(collection_name): axum::extract::Path<String>,
     Json(req): Json<DeleteRequest>,
 ) -> Result<(axum::http::StatusCode, Json<serde_json::Value>), ApiError> {
-    let index = resolve_index(&state.pool, &index_name).await?;
+    let collection = resolve_collection(&state.pool, &collection_name).await?;
     let namespace = req.namespace.unwrap_or_default();
-    let schema = &index.schema_name;
+    let schema = &collection.schema_name;
 
     if req.delete_all == Some(true) {
         sqlx::query(&format!(
-            "DELETE FROM {schema}.vectors WHERE namespace = $1"
+            "DELETE FROM {schema}.records WHERE namespace = $1"
         ))
         .bind(&namespace)
         .execute(&state.pool)
@@ -340,7 +345,7 @@ pub async fn delete_vectors(
             ));
         }
         sqlx::query(&format!(
-            "DELETE FROM {schema}.vectors WHERE namespace = $1 AND id = ANY($2::text[])"
+            "DELETE FROM {schema}.records WHERE namespace = $1 AND id = ANY($2::text[])"
         ))
         .bind(&namespace)
         .bind(ids)
@@ -350,7 +355,8 @@ pub async fn delete_vectors(
         let (filter_sql, filter_params) =
             crate::planner::filter_translator::translate_filter(filter, 1)
                 .map_err(|e| ApiError::InvalidArgument(e.to_string()))?;
-        let sql = format!("DELETE FROM {schema}.vectors WHERE namespace = $1 AND ({filter_sql})");
+        let sql =
+            format!("DELETE FROM {schema}.records WHERE namespace = $1 AND ({filter_sql})");
         let mut q = sqlx::query(&sql).bind(&namespace);
         for p in &filter_params {
             q = q.bind(p.as_str().unwrap_or(""));
@@ -377,15 +383,15 @@ pub struct UpdateRequest {
     pub namespace: Option<String>,
 }
 
-/// POST /indexes/:name/vectors/update
-pub async fn update_vector(
+/// POST /collections/:name/records/update
+pub async fn update_record(
     State(state): State<AppState>,
-    axum::extract::Path(index_name): axum::extract::Path<String>,
+    axum::extract::Path(collection_name): axum::extract::Path<String>,
     Json(req): Json<UpdateRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let index = resolve_index(&state.pool, &index_name).await?;
+    let collection = resolve_collection(&state.pool, &collection_name).await?;
     let namespace = req.namespace.unwrap_or_default();
-    let schema = &index.schema_name;
+    let schema = &collection.schema_name;
 
     let embedding_str = req.values.as_ref().map(|v| {
         format!(
@@ -400,7 +406,7 @@ pub async fn update_vector(
     // metadata is MERGED (JSONB ||), not replaced
     let result = sqlx::query(&format!(
         r#"
-        UPDATE {schema}.vectors SET
+        UPDATE {schema}.records SET
             values       = CASE WHEN $3::text IS NOT NULL THEN $3::vector ELSE values END,
             text_content = CASE WHEN $4::text IS NOT NULL THEN $4       ELSE text_content END,
             metadata     = COALESCE(metadata, '{{}}'::jsonb) || COALESCE($5::jsonb, '{{}}'::jsonb),
@@ -419,7 +425,7 @@ pub async fn update_vector(
 
     if result.is_none() {
         return Err(ApiError::NotFound(format!(
-            "Vector '{}' not found in namespace '{}'.",
+            "Record '{}' not found in namespace '{}'.",
             req.id, namespace
         )));
     }
@@ -429,13 +435,13 @@ pub async fn update_vector(
 
 // --- List ---
 
-/// GET /indexes/:name/vectors/list
-pub async fn list_vectors(
+/// GET /collections/:name/records/list
+pub async fn list_records(
     State(state): State<AppState>,
-    axum::extract::Path(index_name): axum::extract::Path<String>,
+    axum::extract::Path(collection_name): axum::extract::Path<String>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let index = resolve_index(&state.pool, &index_name).await?;
+    let collection = resolve_collection(&state.pool, &collection_name).await?;
     let namespace = params.get("namespace").cloned().unwrap_or_default();
     let prefix = params.get("prefix").cloned().unwrap_or_default();
     let limit: i64 = params
@@ -444,10 +450,10 @@ pub async fn list_vectors(
         .unwrap_or(100)
         .min(1000);
     let cursor = params.get("paginationToken").cloned().unwrap_or_default();
-    let schema = &index.schema_name;
+    let schema = &collection.schema_name;
 
     let rows = sqlx::query(&format!(
-        "SELECT id FROM {schema}.vectors WHERE namespace = $1 AND id LIKE $2 AND id > $3 ORDER BY id LIMIT $4"
+        "SELECT id FROM {schema}.records WHERE namespace = $1 AND id LIKE $2 AND id > $3 ORDER BY id LIMIT $4"
     ))
     .bind(&namespace)
     .bind(format!("{prefix}%"))
@@ -471,7 +477,7 @@ pub async fn list_vectors(
     };
 
     Ok(Json(serde_json::json!({
-        "vectors": ids,
+        "records": ids,
         "namespace": namespace,
         "pagination": next_token.map(|t| serde_json::json!({"next": t})),
     })))
@@ -511,14 +517,14 @@ fn default_include_true() -> bool {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScrollResponse {
-    pub vectors: Vec<ScrollVector>,
+    pub records: Vec<ScrollRecord>,
     pub namespace: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
 }
 
 #[derive(Serialize)]
-pub struct ScrollVector {
+pub struct ScrollRecord {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub values: Option<Vec<f32>>,
@@ -526,16 +532,16 @@ pub struct ScrollVector {
     pub metadata: Option<serde_json::Value>,
 }
 
-/// POST /indexes/:name/vectors/scroll
-pub async fn scroll_vectors(
+/// POST /collections/:name/records/scroll
+pub async fn scroll_records(
     State(state): State<AppState>,
-    axum::extract::Path(index_name): axum::extract::Path<String>,
+    axum::extract::Path(collection_name): axum::extract::Path<String>,
     Json(req): Json<ScrollRequest>,
 ) -> Result<Json<ScrollResponse>, ApiError> {
     let limit = req.limit.clamp(1, 1000);
-    let index = resolve_index(&state.pool, &index_name).await?;
+    let collection = resolve_collection(&state.pool, &collection_name).await?;
     let namespace = req.namespace.unwrap_or_default();
-    let schema = &index.schema_name;
+    let schema = &collection.schema_name;
     let cursor = req.cursor.unwrap_or_default();
 
     let values_col = if req.include_values {
@@ -561,7 +567,7 @@ pub async fn scroll_vectors(
     let sql = format!(
         r#"
         SELECT id, {values_col}, {metadata_col}
-        FROM {schema}.vectors
+        FROM {schema}.records
         WHERE namespace = $1
           AND id > $2
           AND ({filter_sql})
@@ -580,14 +586,14 @@ pub async fn scroll_vectors(
     let has_more = rows.len() as i64 > limit;
     let take_count = if has_more { limit as usize } else { rows.len() };
 
-    let vectors: Vec<ScrollVector> = rows
+    let records: Vec<ScrollRecord> = rows
         .into_iter()
         .take(take_count)
         .map(|row| {
             let id: String = row.get("id");
             let values_str: Option<String> = row.get("values");
             let metadata: Option<serde_json::Value> = row.get("metadata");
-            ScrollVector {
+            ScrollRecord {
                 id,
                 values: values_str.map(|s| parse_pgvector_str(&s)),
                 metadata,
@@ -596,13 +602,13 @@ pub async fn scroll_vectors(
         .collect();
 
     let next_cursor = if has_more {
-        vectors.last().map(|v| v.id.clone())
+        records.last().map(|r| r.id.clone())
     } else {
         None
     };
 
     Ok(Json(ScrollResponse {
-        vectors,
+        records,
         namespace,
         next_cursor,
     }))
@@ -629,20 +635,20 @@ fn default_sample_size() -> i64 {
 
 #[derive(Serialize)]
 pub struct SampleResponse {
-    pub vectors: Vec<ScrollVector>,
+    pub records: Vec<ScrollRecord>,
     pub namespace: String,
 }
 
-/// POST /indexes/:name/sample
-pub async fn sample_vectors(
+/// POST /collections/:name/sample
+pub async fn sample_records(
     State(state): State<AppState>,
-    axum::extract::Path(index_name): axum::extract::Path<String>,
+    axum::extract::Path(collection_name): axum::extract::Path<String>,
     Json(req): Json<SampleRequest>,
 ) -> Result<Json<SampleResponse>, ApiError> {
     let size = req.size.clamp(1, 1000);
-    let index = resolve_index(&state.pool, &index_name).await?;
+    let collection = resolve_collection(&state.pool, &collection_name).await?;
     let namespace = req.namespace.unwrap_or_default();
-    let schema = &index.schema_name;
+    let schema = &collection.schema_name;
 
     let values_col = if req.include_values {
         "values::text"
@@ -665,7 +671,7 @@ pub async fn sample_vectors(
     let sql = format!(
         r#"
         SELECT id, {values_col}, {metadata_col}
-        FROM {schema}.vectors
+        FROM {schema}.records
         WHERE namespace = $1
           AND ({filter_sql})
         ORDER BY random()
@@ -680,13 +686,13 @@ pub async fn sample_vectors(
 
     let rows = query.fetch_all(&state.pool).await?;
 
-    let vectors: Vec<ScrollVector> = rows
+    let records: Vec<ScrollRecord> = rows
         .into_iter()
         .map(|row| {
             let id: String = row.get("id");
             let values_str: Option<String> = row.get("values");
             let metadata: Option<serde_json::Value> = row.get("metadata");
-            ScrollVector {
+            ScrollRecord {
                 id,
                 values: values_str.map(|s| parse_pgvector_str(&s)),
                 metadata,
@@ -694,5 +700,5 @@ pub async fn sample_vectors(
         })
         .collect();
 
-    Ok(Json(SampleResponse { vectors, namespace }))
+    Ok(Json(SampleResponse { records, namespace }))
 }

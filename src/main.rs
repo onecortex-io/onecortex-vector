@@ -57,64 +57,73 @@ async fn main() {
 }
 
 fn build_public_router(state: state::AppState) -> Router {
-    use handlers::{aliases, health, indexes, namespaces, query, vectors};
+    use handlers::{aliases, collections, health, namespaces, query, records};
 
     Router::new()
         // Health (exempt from auth)
         .route("/health", get(health::health))
         .route("/ready", get(health::ready))
         .route("/version", get(health::version))
-        // Control plane -- index management
+        // Control plane -- collection management
         .route(
-            "/indexes",
-            get(indexes::list_indexes).post(indexes::create_index),
+            "/collections",
+            get(collections::list_collections).post(collections::create_collection),
         )
         .route(
-            "/indexes/:name",
-            get(indexes::describe_index)
-                .delete(indexes::delete_index)
-                .patch(indexes::configure_index),
+            "/collections/:name",
+            get(collections::describe_collection)
+                .delete(collections::delete_collection)
+                .patch(collections::configure_collection),
         )
         .route(
-            "/indexes/:name/describe_index_stats",
-            post(indexes::describe_index_stats),
+            "/collections/:name/describe_collection_stats",
+            post(collections::describe_collection_stats),
         )
-        // Data plane -- vector operations
+        // Data plane -- record operations
         .route(
-            "/indexes/:name/vectors/upsert",
-            post(vectors::upsert_vectors),
-        )
-        .route("/indexes/:name/vectors/fetch", post(vectors::fetch_vectors))
-        .route(
-            "/indexes/:name/vectors/fetch_by_metadata",
-            post(vectors::fetch_by_metadata),
+            "/collections/:name/records/upsert",
+            post(records::upsert_records),
         )
         .route(
-            "/indexes/:name/vectors/delete",
-            post(vectors::delete_vectors),
+            "/collections/:name/records/fetch",
+            post(records::fetch_records),
         )
         .route(
-            "/indexes/:name/vectors/update",
-            post(vectors::update_vector),
+            "/collections/:name/records/fetch_by_metadata",
+            post(records::fetch_by_metadata),
         )
-        .route("/indexes/:name/vectors/list", get(vectors::list_vectors))
         .route(
-            "/indexes/:name/vectors/scroll",
-            post(vectors::scroll_vectors),
+            "/collections/:name/records/delete",
+            post(records::delete_records),
         )
-        .route("/indexes/:name/sample", post(vectors::sample_vectors))
+        .route(
+            "/collections/:name/records/update",
+            post(records::update_record),
+        )
+        .route(
+            "/collections/:name/records/list",
+            get(records::list_records),
+        )
+        .route(
+            "/collections/:name/records/scroll",
+            post(records::scroll_records),
+        )
+        .route("/collections/:name/sample", post(records::sample_records))
         // Query
-        .route("/indexes/:name/query", post(query::query_vectors))
-        .route("/indexes/:name/query/hybrid", post(query::query_hybrid))
-        .route("/indexes/:name/query/batch", post(query::query_batch))
-        .route("/indexes/:name/recommend", post(query::recommend))
+        .route("/collections/:name/query", post(query::query_vectors))
+        .route(
+            "/collections/:name/query/hybrid",
+            post(query::query_hybrid),
+        )
+        .route("/collections/:name/query/batch", post(query::query_batch))
+        .route("/collections/:name/recommend", post(query::recommend))
         // Namespace CRUD
         .route(
-            "/indexes/:name/namespaces",
+            "/collections/:name/namespaces",
             get(namespaces::list_namespaces).post(namespaces::create_namespace),
         )
         .route(
-            "/indexes/:name/namespaces/:ns",
+            "/collections/:name/namespaces/:ns",
             get(namespaces::describe_namespace).delete(namespaces::delete_namespace),
         )
         // Aliases
@@ -138,8 +147,14 @@ fn build_admin_router(state: state::AppState) -> Router {
     use handlers::{admin, health};
     Router::new()
         .route("/metrics", get(health::metrics))
-        .route("/admin/indexes/:name/reindex", post(admin::reindex))
-        .route("/admin/indexes/:name/vacuum", post(admin::vacuum))
+        .route(
+            "/admin/collections/:name/reindex",
+            post(admin::reindex),
+        )
+        .route(
+            "/admin/collections/:name/vacuum",
+            post(admin::vacuum),
+        )
         .route("/admin/api_keys", post(admin::create_api_key))
         .route("/admin/api_keys/:id", delete(admin::revoke_api_key))
         .route("/admin/config", get(admin::dump_config))

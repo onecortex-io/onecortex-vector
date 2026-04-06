@@ -10,10 +10,13 @@ async fn query_cosine() {
     let client = Client::new();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
                 {"id": "v2", "values": [0.0, 1.0, 0.0]},
                 {"id": "v3", "values": [0.0, 0.0, 1.0]},
@@ -24,7 +27,7 @@ async fn query_cosine() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/query", server.base_url))
+        .post(format!("{}/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -58,10 +61,13 @@ async fn query_euclidean() {
     let client = Client::new();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
                 {"id": "v2", "values": [0.0, 1.0, 0.0]},
             ]
@@ -71,7 +77,7 @@ async fn query_euclidean() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/query", server.base_url))
+        .post(format!("{}/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -107,10 +113,13 @@ async fn query_dotproduct() {
     let client = Client::new();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
                 {"id": "v2", "values": [0.5, 0.5, 0.0]},
             ]
@@ -120,7 +129,7 @@ async fn query_dotproduct() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/query", server.base_url))
+        .post(format!("{}/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -155,10 +164,13 @@ async fn query_with_metadata_filter() {
     let client = Client::new();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"category": "news"}},
                 {"id": "v2", "values": [0.9, 0.1, 0.0], "metadata": {"category": "sports"}},
                 {"id": "v3", "values": [0.8, 0.2, 0.0], "metadata": {"category": "news"}},
@@ -169,7 +181,7 @@ async fn query_with_metadata_filter() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/query", server.base_url))
+        .post(format!("{}/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -199,7 +211,7 @@ async fn query_top_k_too_large() {
     let client = Client::new();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/query", server.base_url))
+        .post(format!("{}/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -220,10 +232,13 @@ async fn query_by_id() {
     let client = Client::new();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
                 {"id": "v2", "values": [0.0, 1.0, 0.0]},
             ]
@@ -233,7 +248,7 @@ async fn query_by_id() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/query", server.base_url))
+        .post(format!("{}/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "id": "v1",
@@ -261,11 +276,14 @@ async fn query_namespace_isolation() {
 
     // Upsert to ns1
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "namespace": "ns1",
-            "vectors": [{"id": "v1", "values": [1.0, 0.0, 0.0]}]
+            "records": [{"id": "v1", "values": [1.0, 0.0, 0.0]}]
         }))
         .send()
         .await
@@ -273,11 +291,14 @@ async fn query_namespace_isolation() {
 
     // Upsert to ns2
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "namespace": "ns2",
-            "vectors": [{"id": "v2", "values": [0.0, 1.0, 0.0]}]
+            "records": [{"id": "v2", "values": [0.0, 1.0, 0.0]}]
         }))
         .send()
         .await
@@ -285,7 +306,7 @@ async fn query_namespace_isolation() {
 
     // Query ns1 -- should only get v1
     let resp = client
-        .post(format!("{}/indexes/{name}/query", server.base_url))
+        .post(format!("{}/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -302,7 +323,7 @@ async fn query_namespace_isolation() {
 
     // Query ns2 -- should only get v2
     let resp = client
-        .post(format!("{}/indexes/{name}/query", server.base_url))
+        .post(format!("{}/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -323,18 +344,18 @@ async fn query_namespace_isolation() {
 #[tokio::test]
 async fn query_score_threshold_filters_low_scores() {
     let server = common::start_test_server().await;
-    let index = common::create_test_index(&server, 3, "cosine").await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
     let client = reqwest::Client::new();
 
     // v1 is identical to query (score ~1.0), v2 is orthogonal (score ~0.0)
     client
         .post(format!(
-            "{}/indexes/{index}/vectors/upsert",
+            "{}/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
                 {"id": "v2", "values": [0.0, 1.0, 0.0]},
             ]
@@ -345,7 +366,10 @@ async fn query_score_threshold_filters_low_scores() {
 
     // High threshold — only v1 (score ~1.0) should pass
     let resp = client
-        .post(format!("{}/indexes/{index}/query", server.base_url))
+        .post(format!(
+            "{}/collections/{collection}/query",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -362,23 +386,23 @@ async fn query_score_threshold_filters_low_scores() {
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0]["id"], "v1");
 
-    common::cleanup_index(&server, &index).await;
+    common::cleanup_index(&server, &collection).await;
 }
 
 #[tokio::test]
 async fn query_score_threshold_zero_returns_all() {
     let server = common::start_test_server().await;
-    let index = common::create_test_index(&server, 3, "cosine").await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
     let client = reqwest::Client::new();
 
     client
         .post(format!(
-            "{}/indexes/{index}/vectors/upsert",
+            "{}/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
                 {"id": "v2", "values": [0.0, 1.0, 0.0]},
             ]
@@ -388,7 +412,10 @@ async fn query_score_threshold_zero_returns_all() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{index}/query", server.base_url))
+        .post(format!(
+            "{}/collections/{collection}/query",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -403,17 +430,20 @@ async fn query_score_threshold_zero_returns_all() {
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["matches"].as_array().unwrap().len(), 2);
 
-    common::cleanup_index(&server, &index).await;
+    common::cleanup_index(&server, &collection).await;
 }
 
 #[tokio::test]
 async fn query_score_threshold_out_of_range_returns_400() {
     let server = common::start_test_server().await;
-    let index = common::create_test_index(&server, 3, "cosine").await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
     let client = reqwest::Client::new();
 
     let resp = client
-        .post(format!("{}/indexes/{index}/query", server.base_url))
+        .post(format!(
+            "{}/collections/{collection}/query",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -426,23 +456,23 @@ async fn query_score_threshold_out_of_range_returns_400() {
 
     assert_eq!(resp.status(), 400);
 
-    common::cleanup_index(&server, &index).await;
+    common::cleanup_index(&server, &collection).await;
 }
 
 #[tokio::test]
 async fn batch_query_returns_multiple_results() {
     let server = common::start_test_server().await;
-    let index = common::create_test_index(&server, 3, "cosine").await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
     let client = reqwest::Client::new();
 
     client
         .post(format!(
-            "{}/indexes/{index}/vectors/upsert",
+            "{}/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
                 {"id": "v2", "values": [0.0, 1.0, 0.0]},
                 {"id": "v3", "values": [0.0, 0.0, 1.0]},
@@ -453,7 +483,10 @@ async fn batch_query_returns_multiple_results() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{index}/query/batch", server.base_url))
+        .post(format!(
+            "{}/collections/{collection}/query/batch",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "queries": [
@@ -476,17 +509,20 @@ async fn batch_query_returns_multiple_results() {
     // Second query should have v2 as top match
     assert_eq!(results[1]["matches"][0]["id"], "v2");
 
-    common::cleanup_index(&server, &index).await;
+    common::cleanup_index(&server, &collection).await;
 }
 
 #[tokio::test]
 async fn batch_query_empty_returns_400() {
     let server = common::start_test_server().await;
-    let index = common::create_test_index(&server, 3, "cosine").await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
     let client = reqwest::Client::new();
 
     let resp = client
-        .post(format!("{}/indexes/{index}/query/batch", server.base_url))
+        .post(format!(
+            "{}/collections/{collection}/query/batch",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({"queries": []}))
         .send()
@@ -495,13 +531,13 @@ async fn batch_query_empty_returns_400() {
 
     assert_eq!(resp.status(), 400);
 
-    common::cleanup_index(&server, &index).await;
+    common::cleanup_index(&server, &collection).await;
 }
 
 #[tokio::test]
 async fn batch_query_exceeds_limit_returns_400() {
     let server = common::start_test_server().await;
-    let index = common::create_test_index(&server, 3, "cosine").await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
     let client = reqwest::Client::new();
 
     let queries: Vec<serde_json::Value> = (0..11)
@@ -509,7 +545,10 @@ async fn batch_query_exceeds_limit_returns_400() {
         .collect();
 
     let resp = client
-        .post(format!("{}/indexes/{index}/query/batch", server.base_url))
+        .post(format!(
+            "{}/collections/{collection}/query/batch",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({"queries": queries}))
         .send()
@@ -518,23 +557,23 @@ async fn batch_query_exceeds_limit_returns_400() {
 
     assert_eq!(resp.status(), 400);
 
-    common::cleanup_index(&server, &index).await;
+    common::cleanup_index(&server, &collection).await;
 }
 
 #[tokio::test]
 async fn query_group_by_metadata_field() {
     let server = common::start_test_server().await;
-    let index = common::create_test_index(&server, 3, "cosine").await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
     let client = reqwest::Client::new();
 
     client
         .post(format!(
-            "{}/indexes/{index}/vectors/upsert",
+            "{}/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "n1-c1", "values": [0.9, 0.1, 0.0], "metadata": {"doc": "news-1"}},
                 {"id": "n1-c2", "values": [0.8, 0.2, 0.0], "metadata": {"doc": "news-1"}},
                 {"id": "n1-c3", "values": [0.7, 0.3, 0.0], "metadata": {"doc": "news-1"}},
@@ -547,7 +586,10 @@ async fn query_group_by_metadata_field() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{index}/query", server.base_url))
+        .post(format!(
+            "{}/collections/{collection}/query",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -574,17 +616,17 @@ async fn query_group_by_metadata_field() {
     assert!(groups[0]["matches"].as_array().unwrap().len() <= 2);
     assert!(groups[1]["matches"].as_array().unwrap().len() <= 2);
 
-    common::cleanup_index(&server, &index).await;
+    common::cleanup_index(&server, &collection).await;
 }
 
 #[tokio::test]
 async fn query_group_by_caps_per_group() {
     let server = common::start_test_server().await;
-    let index = common::create_test_index(&server, 3, "cosine").await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
     let client = reqwest::Client::new();
 
-    // 5 vectors all in same group
-    let vectors: Vec<serde_json::Value> = (1..=5)
+    // 5 records all in same group
+    let records: Vec<serde_json::Value> = (1..=5)
         .map(|i| {
             json!({
                 "id": format!("v{i}"),
@@ -595,17 +637,20 @@ async fn query_group_by_caps_per_group() {
         .collect();
     client
         .post(format!(
-            "{}/indexes/{index}/vectors/upsert",
+            "{}/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
-        .json(&json!({"vectors": vectors}))
+        .json(&json!({"records": records}))
         .send()
         .await
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{index}/query", server.base_url))
+        .post(format!(
+            "{}/collections/{collection}/query",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -620,34 +665,37 @@ async fn query_group_by_caps_per_group() {
     let body: serde_json::Value = resp.json().await.unwrap();
     let groups = body["matches"].as_array().unwrap();
     assert_eq!(groups.len(), 1);
-    // Capped at groupSize=2 even though 5 vectors match
+    // Capped at groupSize=2 even though 5 records match
     assert_eq!(groups[0]["matches"].as_array().unwrap().len(), 2);
 
-    common::cleanup_index(&server, &index).await;
+    common::cleanup_index(&server, &collection).await;
 }
 
 #[tokio::test]
 async fn query_without_group_by_returns_flat_matches() {
     // Ensure the return type change doesn't break standard queries
     let server = common::start_test_server().await;
-    let index = common::create_test_index(&server, 3, "cosine").await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
     let client = reqwest::Client::new();
 
     client
         .post(format!(
-            "{}/indexes/{index}/vectors/upsert",
+            "{}/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [{"id": "v1", "values": [1.0, 0.0, 0.0]}]
+            "records": [{"id": "v1", "values": [1.0, 0.0, 0.0]}]
         }))
         .send()
         .await
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{index}/query", server.base_url))
+        .post(format!(
+            "{}/collections/{collection}/query",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({"vector": [1.0, 0.0, 0.0], "topK": 1}))
         .send()
@@ -662,23 +710,23 @@ async fn query_without_group_by_returns_flat_matches() {
     assert_eq!(matches[0]["id"], "v1");
     assert!(matches[0]["score"].is_f64());
 
-    common::cleanup_index(&server, &index).await;
+    common::cleanup_index(&server, &collection).await;
 }
 
 #[tokio::test]
 async fn recommend_basic() {
     let server = common::start_test_server().await;
-    let index = common::create_test_index(&server, 3, "cosine").await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
     let client = reqwest::Client::new();
 
     client
         .post(format!(
-            "{}/indexes/{index}/vectors/upsert",
+            "{}/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
                 {"id": "v2", "values": [0.9, 0.1, 0.0]},
                 {"id": "v3", "values": [0.0, 1.0, 0.0]},
@@ -690,7 +738,10 @@ async fn recommend_basic() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{index}/recommend", server.base_url))
+        .post(format!(
+            "{}/collections/{collection}/recommend",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "positiveIds": ["v1"],
@@ -708,23 +759,23 @@ async fn recommend_basic() {
     // v2 should be top match (most similar to v1)
     assert_eq!(matches[0]["id"], "v2");
 
-    common::cleanup_index(&server, &index).await;
+    common::cleanup_index(&server, &collection).await;
 }
 
 #[tokio::test]
 async fn recommend_with_negatives() {
     let server = common::start_test_server().await;
-    let index = common::create_test_index(&server, 3, "cosine").await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
     let client = reqwest::Client::new();
 
     client
         .post(format!(
-            "{}/indexes/{index}/vectors/upsert",
+            "{}/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
                 {"id": "v2", "values": [0.5, 0.5, 0.0]},
                 {"id": "v3", "values": [0.0, 1.0, 0.0]},
@@ -736,10 +787,11 @@ async fn recommend_with_negatives() {
         .unwrap();
 
     // Positive: v1=[1,0,0], Negative: v3=[0,1,0]
-    // Synthetic ≈ [1,0,0] - [0,1,0] = [1,-1,0]
-    // v4 (close to [1,0,0]) should rank higher than v2 (has 0.5 in y-axis)
     let resp = client
-        .post(format!("{}/indexes/{index}/recommend", server.base_url))
+        .post(format!(
+            "{}/collections/{collection}/recommend",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "positiveIds": ["v1"],
@@ -757,17 +809,20 @@ async fn recommend_with_negatives() {
     // v1 and v3 excluded (input IDs)
     assert!(matches.iter().all(|m| m["id"] != "v1" && m["id"] != "v3"));
 
-    common::cleanup_index(&server, &index).await;
+    common::cleanup_index(&server, &collection).await;
 }
 
 #[tokio::test]
 async fn recommend_empty_positives_returns_400() {
     let server = common::start_test_server().await;
-    let index = common::create_test_index(&server, 3, "cosine").await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
     let client = reqwest::Client::new();
 
     let resp = client
-        .post(format!("{}/indexes/{index}/recommend", server.base_url))
+        .post(format!(
+            "{}/collections/{collection}/recommend",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "positiveIds": [],
@@ -779,17 +834,20 @@ async fn recommend_empty_positives_returns_400() {
 
     assert_eq!(resp.status(), 400);
 
-    common::cleanup_index(&server, &index).await;
+    common::cleanup_index(&server, &collection).await;
 }
 
 #[tokio::test]
 async fn recommend_nonexistent_positive_returns_404() {
     let server = common::start_test_server().await;
-    let index = common::create_test_index(&server, 3, "cosine").await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
     let client = reqwest::Client::new();
 
     let resp = client
-        .post(format!("{}/indexes/{index}/recommend", server.base_url))
+        .post(format!(
+            "{}/collections/{collection}/recommend",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "positiveIds": ["nonexistent"],
@@ -801,5 +859,5 @@ async fn recommend_nonexistent_positive_returns_404() {
 
     assert_eq!(resp.status(), 404);
 
-    common::cleanup_index(&server, &index).await;
+    common::cleanup_index(&server, &collection).await;
 }

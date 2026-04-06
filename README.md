@@ -8,13 +8,13 @@ High performance (⚡) vector database built in Rust (🦀) on PostgreSQL. Simpl
 - **Hybrid search** — combine dense vector similarity with BM25 text search using Reciprocal Rank Fusion (RRF)
 - **Reranking** — plug in Cohere, Voyage, Jina, Pinecone Inference, or a self-hosted cross-encoder to rerank results with natural language queries
 - **Metadata filtering** — rich query DSL with `$eq`, `$ne`, `$gt`, `$lt`, `$in`, `$nin`, `$and`, `$or` operators
-- **Namespaces** — isolate data within an index using scoped operations by namespace
+- **Namespaces** — isolate data within a collection using scoped operations by namespace
 - **Batch queries** — fan out up to 10 queries in a single request with concurrent execution
-- **Scroll & sample** — paginate over all vectors or draw a random sample, both with full filter support
+- **Scroll & sample** — paginate over all records or draw a random sample, both with full filter support
 - **Score threshold** — filter results by minimum similarity score, applied after reranking
 - **GroupBy** — group nearest-neighbor results by any metadata field to avoid same-source clustering
 - **Recommendations** — find similar items from positive/negative example IDs without supplying a query vector
-- **Index aliases** — point a named alias at any index for zero-downtime swaps and A/B testing
+- **Collection aliases** — point a named alias at any collection for zero-downtime swaps and A/B testing
 - **Self-hosted** — runs on your own PostgreSQL instance, no vendor lock-in
 
 ## Quick Start
@@ -47,30 +47,30 @@ curl -s -X POST http://localhost:9090/admin/api_keys \
   -d '{"name":"dev-key"}' | jq .
 ```
 
-### 4. Create an index and query vectors
+### 4. Create a collection and query records
 
 ```bash
 API_KEY="<key-from-step-3>"
 
-# Create an index
-curl -s -X POST http://localhost:8080/indexes \
+# Create a collection
+curl -s -X POST http://localhost:8080/collections \
   -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"name":"my-index","dimension":3,"metric":"cosine"}'
+  -d '{"name":"my-collection","dimension":3,"metric":"cosine"}'
 
-# Upsert vectors
-curl -s -X POST http://localhost:8080/indexes/my-index/vectors/upsert \
+# Upsert records
+curl -s -X POST http://localhost:8080/collections/my-collection/records/upsert \
   -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "vectors": [
-      {"id":"vec-1","values":[0.1,0.2,0.3],"metadata":{"genre":"sci-fi"}},
-      {"id":"vec-2","values":[0.4,0.5,0.6],"metadata":{"genre":"fantasy"}}
+    "records": [
+      {"id":"rec-1","values":[0.1,0.2,0.3],"metadata":{"genre":"sci-fi"}},
+      {"id":"rec-2","values":[0.4,0.5,0.6],"metadata":{"genre":"fantasy"}}
     ]
   }'
 
 # Query
-curl -s -X POST http://localhost:8080/indexes/my-index/query \
+curl -s -X POST http://localhost:8080/collections/my-collection/query \
   -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"vector":[0.1,0.2,0.3],"topK":5,"includeMetadata":true}'
@@ -84,38 +84,38 @@ All data-plane endpoints require an `Api-Key` header.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/indexes` | Create an index |
-| GET | `/indexes` | List all indexes |
-| GET | `/indexes/:name` | Describe an index |
-| PATCH | `/indexes/:name` | Configure an index (tags) |
-| DELETE | `/indexes/:name` | Delete an index |
-| POST | `/indexes/:name/describe_index_stats` | Get index statistics |
+| POST | `/collections` | Create a collection |
+| GET | `/collections` | List all collections |
+| GET | `/collections/:name` | Describe a collection |
+| PATCH | `/collections/:name` | Configure a collection (tags, bm25) |
+| DELETE | `/collections/:name` | Delete a collection |
+| POST | `/collections/:name/describe_collection_stats` | Get collection statistics |
 
 ### Data Plane
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/indexes/:name/vectors/upsert` | Upsert vectors |
-| POST | `/indexes/:name/vectors/fetch` | Fetch vectors by ID |
-| POST | `/indexes/:name/vectors/fetch_by_metadata` | Fetch vectors by metadata filter |
-| POST | `/indexes/:name/vectors/delete` | Delete vectors |
-| POST | `/indexes/:name/vectors/update` | Update a vector's metadata |
-| GET | `/indexes/:name/vectors/list` | List vector IDs (IDs only) |
-| POST | `/indexes/:name/vectors/scroll` | Scroll all vectors with cursor pagination |
-| POST | `/indexes/:name/sample` | Random sample of vectors |
-| POST | `/indexes/:name/query` | Query nearest neighbors |
-| POST | `/indexes/:name/query/hybrid` | Hybrid dense + BM25 query |
-| POST | `/indexes/:name/query/batch` | Run up to 10 queries concurrently |
-| POST | `/indexes/:name/recommend` | Recommend by positive/negative example IDs |
+| POST | `/collections/:name/records/upsert` | Upsert records |
+| POST | `/collections/:name/records/fetch` | Fetch records by ID |
+| POST | `/collections/:name/records/fetch_by_metadata` | Fetch records by metadata filter |
+| POST | `/collections/:name/records/delete` | Delete records |
+| POST | `/collections/:name/records/update` | Update a record's metadata |
+| GET | `/collections/:name/records/list` | List record IDs (IDs only) |
+| POST | `/collections/:name/records/scroll` | Scroll all records with cursor pagination |
+| POST | `/collections/:name/sample` | Random sample of records |
+| POST | `/collections/:name/query` | Query nearest neighbors |
+| POST | `/collections/:name/query/hybrid` | Hybrid dense + BM25 query |
+| POST | `/collections/:name/query/batch` | Run up to 10 queries concurrently |
+| POST | `/collections/:name/recommend` | Recommend by positive/negative example IDs |
 
 ### Namespaces
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/indexes/:name/namespaces` | List namespaces |
-| POST | `/indexes/:name/namespaces` | Create a namespace |
-| GET | `/indexes/:name/namespaces/:ns` | Describe a namespace |
-| DELETE | `/indexes/:name/namespaces/:ns` | Delete a namespace |
+| GET | `/collections/:name/namespaces` | List namespaces |
+| POST | `/collections/:name/namespaces` | Create a namespace |
+| GET | `/collections/:name/namespaces/:ns` | Describe a namespace |
+| DELETE | `/collections/:name/namespaces/:ns` | Delete a namespace |
 
 ### Aliases
 
@@ -136,34 +136,34 @@ All data-plane endpoints require an `Api-Key` header.
 | GET | `/metrics` | 9090 | Prometheus metrics |
 | POST | `/admin/api_keys` | 9090 | Create API key |
 | DELETE | `/admin/api_keys/:id` | 9090 | Revoke API key |
-| POST | `/admin/indexes/:name/reindex` | 9090 | Rebuild DiskANN index |
-| POST | `/admin/indexes/:name/vacuum` | 9090 | Vacuum an index |
+| POST | `/admin/collections/:name/reindex` | 9090 | Rebuild DiskANN index |
+| POST | `/admin/collections/:name/vacuum` | 9090 | Vacuum a collection |
 | GET | `/admin/config` | 9090 | Dump current config |
 
 ## Hybrid Search
 
-Create a BM25-enabled index, upsert vectors with text, and query with both vector and keyword:
+Create a BM25-enabled collection, upsert records with text, and query with both vector and keyword:
 
 ```bash
 # Create with BM25 enabled
-curl -s -X POST http://localhost:8080/indexes \
+curl -s -X POST http://localhost:8080/collections \
   -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"name":"hybrid-index","dimension":3,"metric":"cosine","bm25_enabled":true}'
+  -d '{"name":"hybrid-col","dimension":3,"metric":"cosine","bm25_enabled":true}'
 
 # Upsert with text for BM25
-curl -s -X POST http://localhost:8080/indexes/hybrid-index/vectors/upsert \
+curl -s -X POST http://localhost:8080/collections/hybrid-col/records/upsert \
   -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "vectors": [
-      {"id":"v1","values":[1,0,0],"text":"machine learning basics"},
-      {"id":"v2","values":[0,1,0],"text":"cooking recipes"}
+    "records": [
+      {"id":"r1","values":[1,0,0],"text":"machine learning basics"},
+      {"id":"r2","values":[0,1,0],"text":"cooking recipes"}
     ]
   }'
 
 # Hybrid query (dense + BM25, fused with RRF)
-curl -s -X POST http://localhost:8080/indexes/hybrid-index/query/hybrid \
+curl -s -X POST http://localhost:8080/collections/hybrid-col/query/hybrid \
   -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"vector":[1,0,0],"text":"machine learning","topK":5}'
@@ -174,7 +174,7 @@ curl -s -X POST http://localhost:8080/indexes/hybrid-index/query/hybrid \
 Add a `rerank` object to any query to rerank results using a natural language query:
 
 ```bash
-curl -s -X POST http://localhost:8080/indexes/my-index/query \
+curl -s -X POST http://localhost:8080/collections/my-collection/query \
   -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -216,7 +216,7 @@ Drop results below a minimum similarity score (applied after reranking):
 Send up to 10 queries in one round-trip; results are returned in the same order:
 
 ```bash
-curl -s -X POST http://localhost:8080/indexes/my-index/query/batch \
+curl -s -X POST http://localhost:8080/collections/my-collection/query/batch \
   -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"queries":[{"vector":[1,0,0],"topK":5},{"vector":[0,1,0],"topK":3}]}'
@@ -235,22 +235,22 @@ Group results by a metadata field to ensure diversity across sources:
 Find similar items from example IDs — no query vector needed:
 
 ```bash
-curl -s -X POST http://localhost:8080/indexes/my-index/recommend \
+curl -s -X POST http://localhost:8080/collections/my-collection/recommend \
   -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"positiveIds":["vec-1","vec-2"],"negativeIds":["vec-9"],"topK":10}'
+  -d '{"positiveIds":["rec-1","rec-2"],"negativeIds":["rec-9"],"topK":10}'
 ```
 
-### Index Aliases
+### Collection Aliases
 
-Aliases resolve transparently on every endpoint, enabling zero-downtime index swaps:
+Aliases resolve transparently on every endpoint, enabling zero-downtime collection swaps:
 
 ```bash
-# Point "prod" at a new index atomically
+# Point "prod" at a new collection atomically
 curl -s -X POST http://localhost:8080/aliases \
   -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"alias":"prod","indexName":"my-index-v2"}'
+  -d '{"alias":"prod","collectionName":"my-collection-v2"}'
 ```
 
 ## Configuration
@@ -278,16 +278,16 @@ All environment variables use the `ONECORTEX_VECTOR_` prefix. Copy `.env.example
 from onecortex import Onecortex
 
 client = Onecortex(url="http://localhost:8080", api_key="your-api-key")
-idx = client.vector.index("my-index")
-results = await idx.query(vector=[0.1, 0.2, 0.3], top_k=5)
+col = client.vector.collection("my-collection")
+results = await col.query(vector=[0.1, 0.2, 0.3], top_k=5)
 ```
 
 ```typescript
 import { Onecortex } from '@onecortex/sdk';
 
 const client = new Onecortex({ url: 'http://localhost:8080', apiKey: 'your-api-key' });
-const idx = client.vector.index('my-index');
-const results = await idx.query({ vector: [0.1, 0.2, 0.3], topK: 5 });
+const col = client.vector.collection('my-collection');
+const results = await col.query({ vector: [0.1, 0.2, 0.3], topK: 5 });
 ```
 
 ## Architecture
@@ -299,7 +299,7 @@ Client → REST API (axum) → PostgreSQL 18
                               └── pg_textsearch (BM25 full-text search)
 ```
 
-Each user index gets its own PostgreSQL schema (`idx_<name>`), providing full isolation. Index metadata is tracked in the `_onecortex_vector` catalog schema. Migrations are managed by sqlx and applied automatically on server startup.
+Each collection gets its own PostgreSQL schema (`col_<uuid>`), providing full isolation. Collection metadata is tracked in the `_onecortex_vector` catalog schema. Migrations are managed by sqlx and applied automatically on server startup.
 
 ## Development
 

@@ -17,7 +17,7 @@ async fn create_index_success() {
     let client = Client::new();
 
     let resp = client
-        .post(format!("{}/indexes", server.base_url))
+        .post(format!("{}/collections", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "name": name, "dimension": 3, "metric": "cosine" }))
         .send()
@@ -41,7 +41,7 @@ async fn create_index_duplicate() {
     let client = Client::new();
 
     let resp = client
-        .post(format!("{}/indexes", server.base_url))
+        .post(format!("{}/collections", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "name": name, "dimension": 3, "metric": "cosine" }))
         .send()
@@ -61,7 +61,7 @@ async fn create_index_bad_dimension() {
     let client = Client::new();
 
     let resp = client
-        .post(format!("{}/indexes", server.base_url))
+        .post(format!("{}/collections", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "name": "bad-dim-test", "dimension": 0, "metric": "cosine" }))
         .send()
@@ -79,7 +79,7 @@ async fn create_index_bad_dimension_too_large() {
     let client = Client::new();
 
     let resp = client
-        .post(format!("{}/indexes", server.base_url))
+        .post(format!("{}/collections", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "name": "bad-dim-large", "dimension": 20001, "metric": "cosine" }))
         .send()
@@ -95,7 +95,7 @@ async fn create_index_bad_metric() {
     let client = Client::new();
 
     let resp = client
-        .post(format!("{}/indexes", server.base_url))
+        .post(format!("{}/collections", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "name": "bad-metric", "dimension": 3, "metric": "hamming" }))
         .send()
@@ -112,7 +112,7 @@ async fn list_indexes() {
     let client = Client::new();
 
     let resp = client
-        .get(format!("{}/indexes", server.base_url))
+        .get(format!("{}/collections", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await
@@ -120,8 +120,8 @@ async fn list_indexes() {
 
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
-    let indexes = body["indexes"].as_array().unwrap();
-    assert!(indexes.iter().any(|i| i["name"] == name));
+    let collections = body["collections"].as_array().unwrap();
+    assert!(collections.iter().any(|i| i["name"] == name));
 
     common::cleanup_index(&server, &name).await;
 }
@@ -133,7 +133,7 @@ async fn describe_index() {
     let client = Client::new();
 
     let resp = client
-        .get(format!("{}/indexes/{name}", server.base_url))
+        .get(format!("{}/collections/{name}", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await
@@ -154,7 +154,7 @@ async fn describe_index_not_found() {
     let client = Client::new();
 
     let resp = client
-        .get(format!("{}/indexes/nonexistent-index", server.base_url))
+        .get(format!("{}/collections/nonexistent-index", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await
@@ -170,7 +170,7 @@ async fn delete_index() {
     let client = Client::new();
 
     let resp = client
-        .delete(format!("{}/indexes/{name}", server.base_url))
+        .delete(format!("{}/collections/{name}", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await
@@ -179,7 +179,7 @@ async fn delete_index() {
 
     // Subsequent GET should return 404
     let resp = client
-        .get(format!("{}/indexes/{name}", server.base_url))
+        .get(format!("{}/collections/{name}", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await
@@ -194,7 +194,7 @@ async fn configure_index() {
     let client = Client::new();
 
     let resp = client
-        .patch(format!("{}/indexes/{name}", server.base_url))
+        .patch(format!("{}/collections/{name}", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "deletion_protection": "enabled" }))
         .send()
@@ -204,7 +204,7 @@ async fn configure_index() {
 
     common::cleanup_index(&server, &name).await;
     // cleanup will fail silently because deletion protection is on, so force-clean via DB
-    sqlx::query("DELETE FROM _onecortex_vector.indexes WHERE name = $1")
+    sqlx::query("DELETE FROM _onecortex_vector.collections WHERE name = $1")
         .bind(&name)
         .execute(&server.pool)
         .await
@@ -219,7 +219,7 @@ async fn deletion_protection_blocks_delete() {
 
     // Enable deletion protection
     client
-        .patch(format!("{}/indexes/{name}", server.base_url))
+        .patch(format!("{}/collections/{name}", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "deletion_protection": "enabled" }))
         .send()
@@ -228,7 +228,7 @@ async fn deletion_protection_blocks_delete() {
 
     // Try to delete -- should get 403
     let resp = client
-        .delete(format!("{}/indexes/{name}", server.base_url))
+        .delete(format!("{}/collections/{name}", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await
@@ -239,7 +239,7 @@ async fn deletion_protection_blocks_delete() {
 
     // Disable protection and cleanup
     client
-        .patch(format!("{}/indexes/{name}", server.base_url))
+        .patch(format!("{}/collections/{name}", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "deletion_protection": "disabled" }))
         .send()
@@ -254,12 +254,15 @@ async fn describe_index_stats() {
     let name = common::create_test_index(&server, 3, "cosine").await;
     let client = Client::new();
 
-    // Upsert some vectors first
+    // Upsert some records first
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
                 {"id": "v2", "values": [0.0, 1.0, 0.0]},
             ]
@@ -273,7 +276,7 @@ async fn describe_index_stats() {
 
     let resp = client
         .post(format!(
-            "{}/indexes/{name}/describe_index_stats",
+            "{}/collections/{name}/describe_collection_stats",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -285,7 +288,7 @@ async fn describe_index_stats() {
 
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["dimension"], 3);
-    assert!(body["totalVectorCount"].as_i64().unwrap() >= 2);
+    assert!(body["totalRecordCount"].as_i64().unwrap() >= 2);
 
     common::cleanup_index(&server, &name).await;
 }

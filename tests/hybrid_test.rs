@@ -9,12 +9,12 @@ async fn hybrid_query_requires_bm25_enabled() {
     let name = common::create_test_index(&server, 3, "cosine").await;
     let client = Client::new();
 
-    // Upsert a vector
+    // Upsert a record
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!("{}/collections/{name}/records/upsert", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [0.1, 0.2, 0.3], "text": "the quick brown fox"}
             ]
         }))
@@ -22,9 +22,9 @@ async fn hybrid_query_requires_bm25_enabled() {
         .await
         .unwrap();
 
-    // Hybrid query on a non-BM25 index should return 400
+    // Hybrid query on a non-BM25 collection should return 400
     let resp = client
-        .post(format!("{}/indexes/{name}/query/hybrid", server.base_url))
+        .post(format!("{}/collections/{name}/query/hybrid", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [0.1, 0.2, 0.3],
@@ -48,12 +48,12 @@ async fn hybrid_query_returns_results() {
     let name = common::create_test_index_with_bm25(&server, 3, "cosine").await;
     let client = Client::new();
 
-    // Upsert vectors with text content
+    // Upsert records with text content
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!("{}/collections/{name}/records/upsert", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0], "text": "the quick brown fox"},
                 {"id": "v2", "values": [0.0, 1.0, 0.0], "text": "lazy dog sleeps all day"},
                 {"id": "v3", "values": [0.0, 0.0, 1.0], "text": "quick fox jumps high"},
@@ -64,7 +64,7 @@ async fn hybrid_query_returns_results() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/query/hybrid", server.base_url))
+        .post(format!("{}/collections/{name}/query/hybrid", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -98,11 +98,11 @@ async fn hybrid_query_topk_max_enforced() {
     let server = common::start_test_server().await;
     let client = Client::new();
 
-    // Create any index — the topK validation happens before the BM25 check
+    // Create any collection — the topK validation happens before the BM25 check
     let name = common::create_test_index_with_bm25(&server, 3, "cosine").await;
 
     let resp = client
-        .post(format!("{}/indexes/{name}/query/hybrid", server.base_url))
+        .post(format!("{}/collections/{name}/query/hybrid", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [0.1, 0.2, 0.3],
@@ -125,7 +125,7 @@ async fn patch_index_enables_bm25() {
 
     // Enable BM25 via PATCH
     let resp = client
-        .patch(format!("{}/indexes/{name}", server.base_url))
+        .patch(format!("{}/collections/{name}", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "bm25Enabled": true }))
         .send()
@@ -135,7 +135,7 @@ async fn patch_index_enables_bm25() {
 
     // Describe should show bm25Enabled: true
     let resp = client
-        .get(format!("{}/indexes/{name}", server.base_url))
+        .get(format!("{}/collections/{name}", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await

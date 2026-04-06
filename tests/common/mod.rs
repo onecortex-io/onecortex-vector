@@ -1,5 +1,3 @@
-use std::net::SocketAddr;
-
 /// Test server handle with base URL and pool.
 pub struct TestServer {
     pub base_url: String,
@@ -48,62 +46,77 @@ pub async fn start_test_server() -> TestServer {
 fn build_test_router(state: onecortex_vector::state::AppState) -> axum::Router {
     use axum::{
         extract::DefaultBodyLimit,
-        routing::{delete, get, patch, post},
+        routing::{get, post},
         Router,
     };
-    use onecortex_vector::handlers::{aliases, health, indexes, namespaces, query, vectors};
+    use onecortex_vector::handlers::{aliases, collections, health, namespaces, query, records};
 
     Router::new()
         .route("/health", get(health::health))
         .route("/ready", get(health::ready))
         .route("/version", get(health::version))
         .route(
-            "/indexes",
-            get(indexes::list_indexes).post(indexes::create_index),
+            "/collections",
+            get(collections::list_collections).post(collections::create_collection),
         )
         .route(
-            "/indexes/:name",
-            get(indexes::describe_index)
-                .delete(indexes::delete_index)
-                .patch(indexes::configure_index),
+            "/collections/:name",
+            get(collections::describe_collection)
+                .delete(collections::delete_collection)
+                .patch(collections::configure_collection),
         )
         .route(
-            "/indexes/:name/describe_index_stats",
-            post(indexes::describe_index_stats),
+            "/collections/:name/describe_collection_stats",
+            post(collections::describe_collection_stats),
         )
         .route(
-            "/indexes/:name/vectors/upsert",
-            post(vectors::upsert_vectors),
-        )
-        .route("/indexes/:name/vectors/fetch", post(vectors::fetch_vectors))
-        .route(
-            "/indexes/:name/vectors/fetch_by_metadata",
-            post(vectors::fetch_by_metadata),
+            "/collections/:name/records/upsert",
+            post(records::upsert_records),
         )
         .route(
-            "/indexes/:name/vectors/delete",
-            post(vectors::delete_vectors),
+            "/collections/:name/records/fetch",
+            post(records::fetch_records),
         )
         .route(
-            "/indexes/:name/vectors/update",
-            post(vectors::update_vector),
+            "/collections/:name/records/fetch_by_metadata",
+            post(records::fetch_by_metadata),
         )
-        .route("/indexes/:name/vectors/list", get(vectors::list_vectors))
         .route(
-            "/indexes/:name/vectors/scroll",
-            post(vectors::scroll_vectors),
+            "/collections/:name/records/delete",
+            post(records::delete_records),
         )
-        .route("/indexes/:name/sample", post(vectors::sample_vectors))
-        .route("/indexes/:name/query", post(query::query_vectors))
-        .route("/indexes/:name/query/hybrid", post(query::query_hybrid))
-        .route("/indexes/:name/query/batch", post(query::query_batch))
-        .route("/indexes/:name/recommend", post(query::recommend))
         .route(
-            "/indexes/:name/namespaces",
+            "/collections/:name/records/update",
+            post(records::update_record),
+        )
+        .route(
+            "/collections/:name/records/list",
+            get(records::list_records),
+        )
+        .route(
+            "/collections/:name/records/scroll",
+            post(records::scroll_records),
+        )
+        .route(
+            "/collections/:name/sample",
+            post(records::sample_records),
+        )
+        .route("/collections/:name/query", post(query::query_vectors))
+        .route(
+            "/collections/:name/query/hybrid",
+            post(query::query_hybrid),
+        )
+        .route(
+            "/collections/:name/query/batch",
+            post(query::query_batch),
+        )
+        .route("/collections/:name/recommend", post(query::recommend))
+        .route(
+            "/collections/:name/namespaces",
             get(namespaces::list_namespaces).post(namespaces::create_namespace),
         )
         .route(
-            "/indexes/:name/namespaces/:ns",
+            "/collections/:name/namespaces/:ns",
             get(namespaces::describe_namespace).delete(namespaces::delete_namespace),
         )
         .route(
@@ -122,14 +135,14 @@ fn build_test_router(state: onecortex_vector::state::AppState) -> axum::Router {
         .with_state(state)
 }
 
-/// Create a test index with a unique name. Returns the index name.
+/// Create a test collection with a unique name. Returns the collection name.
 pub async fn create_test_index(server: &TestServer, dimension: i32, metric: &str) -> String {
     let name = format!("test-{}", uuid::Uuid::new_v4().simple());
     let name = &name[..name.len().min(45)]; // Ensure <= 45 chars
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/indexes", server.base_url))
+        .post(format!("{}/collections", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&serde_json::json!({
             "name": name,
@@ -143,12 +156,12 @@ pub async fn create_test_index(server: &TestServer, dimension: i32, metric: &str
     let status = resp.status();
     if status != 201 {
         let body = resp.text().await.unwrap_or_default();
-        panic!("Failed to create test index (status={status}): {body}");
+        panic!("Failed to create test collection (status={status}): {body}");
     }
     name.to_string()
 }
 
-/// Create a test index with BM25 enabled. Returns the index name.
+/// Create a test collection with BM25 enabled. Returns the collection name.
 pub async fn create_test_index_with_bm25(
     server: &TestServer,
     dimension: i32,
@@ -159,7 +172,7 @@ pub async fn create_test_index_with_bm25(
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/indexes", server.base_url))
+        .post(format!("{}/collections", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&serde_json::json!({
             "name": name,
@@ -174,16 +187,16 @@ pub async fn create_test_index_with_bm25(
     let status = resp.status();
     if status != 201 {
         let body = resp.text().await.unwrap_or_default();
-        panic!("Failed to create BM25 test index (status={status}): {body}");
+        panic!("Failed to create BM25 test collection (status={status}): {body}");
     }
     name.to_string()
 }
 
-/// Delete a test index (cleanup).
+/// Delete a test collection (cleanup).
 pub async fn cleanup_index(server: &TestServer, name: &str) {
     let client = reqwest::Client::new();
     let _ = client
-        .delete(format!("{}/indexes/{}", server.base_url, name))
+        .delete(format!("{}/collections/{}", server.base_url, name))
         .header("Api-Key", &server.api_key)
         .send()
         .await;

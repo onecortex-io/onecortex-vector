@@ -11,10 +11,13 @@ async fn upsert_and_fetch() {
 
     // Upsert
     let resp = client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"color": "red"}},
                 {"id": "v2", "values": [0.0, 1.0, 0.0], "metadata": {"color": "blue"}},
             ]
@@ -28,7 +31,10 @@ async fn upsert_and_fetch() {
 
     // Fetch
     let resp = client
-        .post(format!("{}/indexes/{name}/vectors/fetch", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/fetch",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "ids": ["v1", "v2"] }))
         .send()
@@ -36,9 +42,9 @@ async fn upsert_and_fetch() {
         .unwrap();
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert!(body["vectors"]["v1"].is_object());
-    assert!(body["vectors"]["v2"].is_object());
-    assert_eq!(body["vectors"]["v1"]["metadata"]["color"], "red");
+    assert!(body["records"]["v1"].is_object());
+    assert!(body["records"]["v2"].is_object());
+    assert_eq!(body["records"]["v1"]["metadata"]["color"], "red");
 
     common::cleanup_index(&server, &name).await;
 }
@@ -49,14 +55,17 @@ async fn upsert_batch_too_large() {
     let name = common::create_test_index(&server, 3, "cosine").await;
     let client = Client::new();
 
-    let vectors: Vec<serde_json::Value> = (0..1001)
+    let records: Vec<serde_json::Value> = (0..1001)
         .map(|i| json!({"id": format!("v{i}"), "values": [1.0, 0.0, 0.0]}))
         .collect();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
-        .json(&json!({ "vectors": vectors }))
+        .json(&json!({ "records": records }))
         .send()
         .await
         .unwrap();
@@ -72,10 +81,13 @@ async fn upsert_dimension_mismatch() {
     let client = Client::new();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [{"id": "v1", "values": [1.0, 0.0]}]
+            "records": [{"id": "v1", "values": [1.0, 0.0]}]
         }))
         .send()
         .await
@@ -93,10 +105,13 @@ async fn upsert_sparse_values_accepted() {
 
     // sparseValues should be accepted without error
     let resp = client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [{
+            "records": [{
                 "id": "v1",
                 "values": [1.0, 0.0, 0.0],
                 "sparseValues": {"indices": [0, 1], "values": [0.5, 0.3]}
@@ -116,12 +131,15 @@ async fn fetch_by_metadata_eq() {
     let name = common::create_test_index(&server, 3, "cosine").await;
     let client = Client::new();
 
-    // Upsert vectors with metadata
+    // Upsert records with metadata
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"category": "news"}},
                 {"id": "v2", "values": [0.0, 1.0, 0.0], "metadata": {"category": "sports"}},
             ]
@@ -132,7 +150,7 @@ async fn fetch_by_metadata_eq() {
 
     let resp = client
         .post(format!(
-            "{}/indexes/{name}/vectors/fetch_by_metadata",
+            "{}/collections/{name}/records/fetch_by_metadata",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -142,9 +160,9 @@ async fn fetch_by_metadata_eq() {
         .unwrap();
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
-    let vectors = body["vectors"].as_array().unwrap();
-    assert_eq!(vectors.len(), 1);
-    assert_eq!(vectors[0]["id"], "v1");
+    let records = body["records"].as_array().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["id"], "v1");
 
     common::cleanup_index(&server, &name).await;
 }
@@ -156,10 +174,13 @@ async fn fetch_by_metadata_in() {
     let client = Client::new();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"tag": "a"}},
                 {"id": "v2", "values": [0.0, 1.0, 0.0], "metadata": {"tag": "b"}},
                 {"id": "v3", "values": [0.0, 0.0, 1.0], "metadata": {"tag": "c"}},
@@ -171,7 +192,7 @@ async fn fetch_by_metadata_in() {
 
     let resp = client
         .post(format!(
-            "{}/indexes/{name}/vectors/fetch_by_metadata",
+            "{}/collections/{name}/records/fetch_by_metadata",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -181,8 +202,8 @@ async fn fetch_by_metadata_in() {
         .unwrap();
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
-    let vectors = body["vectors"].as_array().unwrap();
-    assert_eq!(vectors.len(), 2);
+    let records = body["records"].as_array().unwrap();
+    assert_eq!(records.len(), 2);
 
     common::cleanup_index(&server, &name).await;
 }
@@ -194,10 +215,13 @@ async fn delete_by_ids() {
     let client = Client::new();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
                 {"id": "v2", "values": [0.0, 1.0, 0.0]},
             ]
@@ -208,7 +232,10 @@ async fn delete_by_ids() {
 
     // Delete v1
     client
-        .post(format!("{}/indexes/{name}/vectors/delete", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/delete",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "ids": ["v1"] }))
         .send()
@@ -217,15 +244,18 @@ async fn delete_by_ids() {
 
     // Fetch -- v1 should be gone
     let resp = client
-        .post(format!("{}/indexes/{name}/vectors/fetch", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/fetch",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "ids": ["v1", "v2"] }))
         .send()
         .await
         .unwrap();
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert!(body["vectors"]["v1"].is_null());
-    assert!(body["vectors"]["v2"].is_object());
+    assert!(body["records"]["v1"].is_null());
+    assert!(body["records"]["v2"].is_object());
 
     common::cleanup_index(&server, &name).await;
 }
@@ -237,10 +267,13 @@ async fn delete_by_filter() {
     let client = Client::new();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"keep": "no"}},
                 {"id": "v2", "values": [0.0, 1.0, 0.0], "metadata": {"keep": "yes"}},
             ]
@@ -250,7 +283,10 @@ async fn delete_by_filter() {
         .unwrap();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/delete", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/delete",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "filter": {"keep": {"$eq": "no"}} }))
         .send()
@@ -258,15 +294,18 @@ async fn delete_by_filter() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/vectors/fetch", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/fetch",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "ids": ["v1", "v2"] }))
         .send()
         .await
         .unwrap();
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert!(body["vectors"]["v1"].is_null());
-    assert!(body["vectors"]["v2"].is_object());
+    assert!(body["records"]["v1"].is_null());
+    assert!(body["records"]["v2"].is_object());
 
     common::cleanup_index(&server, &name).await;
 }
@@ -278,10 +317,13 @@ async fn delete_all() {
     let client = Client::new();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
                 {"id": "v2", "values": [0.0, 1.0, 0.0]},
             ]
@@ -291,7 +333,10 @@ async fn delete_all() {
         .unwrap();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/delete", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/delete",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "deleteAll": true }))
         .send()
@@ -299,15 +344,18 @@ async fn delete_all() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/vectors/fetch", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/fetch",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "ids": ["v1", "v2"] }))
         .send()
         .await
         .unwrap();
     let body: serde_json::Value = resp.json().await.unwrap();
-    let vectors = body["vectors"].as_object().unwrap();
-    assert!(vectors.is_empty());
+    let records = body["records"].as_object().unwrap();
+    assert!(records.is_empty());
 
     common::cleanup_index(&server, &name).await;
 }
@@ -319,10 +367,13 @@ async fn update_metadata() {
     let client = Client::new();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [{"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"a": 1}}]
+            "records": [{"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"a": 1}}]
         }))
         .send()
         .await
@@ -330,7 +381,10 @@ async fn update_metadata() {
 
     // Update: merge metadata
     let resp = client
-        .post(format!("{}/indexes/{name}/vectors/update", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/update",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "id": "v1", "setMetadata": {"b": 2} }))
         .send()
@@ -340,15 +394,18 @@ async fn update_metadata() {
 
     // Fetch and verify merge
     let resp = client
-        .post(format!("{}/indexes/{name}/vectors/fetch", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/fetch",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "ids": ["v1"] }))
         .send()
         .await
         .unwrap();
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["vectors"]["v1"]["metadata"]["a"], 1);
-    assert_eq!(body["vectors"]["v1"]["metadata"]["b"], 2);
+    assert_eq!(body["records"]["v1"]["metadata"]["a"], 1);
+    assert_eq!(body["records"]["v1"]["metadata"]["b"], 2);
 
     common::cleanup_index(&server, &name).await;
 }
@@ -360,10 +417,13 @@ async fn list_vectors_with_prefix() {
     let client = Client::new();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "doc-1", "values": [1.0, 0.0, 0.0]},
                 {"id": "doc-2", "values": [0.0, 1.0, 0.0]},
                 {"id": "img-1", "values": [0.0, 0.0, 1.0]},
@@ -375,7 +435,7 @@ async fn list_vectors_with_prefix() {
 
     let resp = client
         .get(format!(
-            "{}/indexes/{name}/vectors/list?prefix=doc-",
+            "{}/collections/{name}/records/list?prefix=doc-",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -384,8 +444,8 @@ async fn list_vectors_with_prefix() {
         .unwrap();
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
-    let vectors = body["vectors"].as_array().unwrap();
-    assert_eq!(vectors.len(), 2);
+    let records = body["records"].as_array().unwrap();
+    assert_eq!(records.len(), 2);
 
     common::cleanup_index(&server, &name).await;
 }
@@ -397,10 +457,13 @@ async fn list_vectors_pagination() {
     let client = Client::new();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "a", "values": [1.0, 0.0, 0.0]},
                 {"id": "b", "values": [0.0, 1.0, 0.0]},
                 {"id": "c", "values": [0.0, 0.0, 1.0]},
@@ -413,7 +476,7 @@ async fn list_vectors_pagination() {
     // First page: limit=2
     let resp = client
         .get(format!(
-            "{}/indexes/{name}/vectors/list?limit=2",
+            "{}/collections/{name}/records/list?limit=2",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -421,14 +484,14 @@ async fn list_vectors_pagination() {
         .await
         .unwrap();
     let body: serde_json::Value = resp.json().await.unwrap();
-    let vectors = body["vectors"].as_array().unwrap();
-    assert_eq!(vectors.len(), 2);
+    let records = body["records"].as_array().unwrap();
+    assert_eq!(records.len(), 2);
     let next = body["pagination"]["next"].as_str().unwrap();
 
     // Second page
     let resp = client
         .get(format!(
-            "{}/indexes/{name}/vectors/list?limit=2&paginationToken={next}",
+            "{}/collections/{name}/records/list?limit=2&paginationToken={next}",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -436,8 +499,8 @@ async fn list_vectors_pagination() {
         .await
         .unwrap();
     let body: serde_json::Value = resp.json().await.unwrap();
-    let vectors = body["vectors"].as_array().unwrap();
-    assert_eq!(vectors.len(), 1);
+    let records = body["records"].as_array().unwrap();
+    assert_eq!(records.len(), 1);
 
     common::cleanup_index(&server, &name).await;
 }
@@ -449,10 +512,13 @@ async fn scroll_returns_full_vector_data() {
     let client = Client::new();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"color": "red"}},
                 {"id": "v2", "values": [0.0, 1.0, 0.0], "metadata": {"color": "blue"}},
             ]
@@ -462,7 +528,10 @@ async fn scroll_returns_full_vector_data() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/vectors/scroll", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/scroll",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "includeValues": true,
@@ -474,11 +543,11 @@ async fn scroll_returns_full_vector_data() {
 
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
-    let vectors = body["vectors"].as_array().unwrap();
-    assert_eq!(vectors.len(), 2);
+    let records = body["records"].as_array().unwrap();
+    assert_eq!(records.len(), 2);
     // Verify values and metadata are present
-    assert!(vectors[0]["values"].is_array());
-    assert!(vectors[0]["metadata"].is_object());
+    assert!(records[0]["values"].is_array());
+    assert!(records[0]["metadata"].is_object());
 
     common::cleanup_index(&server, &name).await;
 }
@@ -489,53 +558,65 @@ async fn scroll_pagination_with_cursor() {
     let name = common::create_test_index(&server, 3, "cosine").await;
     let client = Client::new();
 
-    // Upsert 5 vectors with predictable IDs (alphabetical ordering matters for cursor)
-    let vectors: Vec<serde_json::Value> = (1..=5)
+    // Upsert 5 records with predictable IDs (alphabetical ordering matters for cursor)
+    let records: Vec<serde_json::Value> = (1..=5)
         .map(|i| json!({"id": format!("v{i}"), "values": [1.0, 0.0, 0.0]}))
         .collect();
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
-        .json(&json!({"vectors": vectors}))
+        .json(&json!({"records": records}))
         .send()
         .await
         .unwrap();
 
     // Page 1: limit=2
     let resp = client
-        .post(format!("{}/indexes/{name}/vectors/scroll", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/scroll",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({"limit": 2}))
         .send()
         .await
         .unwrap();
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["vectors"].as_array().unwrap().len(), 2);
+    assert_eq!(body["records"].as_array().unwrap().len(), 2);
     assert!(body["nextCursor"].is_string());
 
     // Page 2: use cursor
     let cursor = body["nextCursor"].as_str().unwrap();
     let resp = client
-        .post(format!("{}/indexes/{name}/vectors/scroll", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/scroll",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({"limit": 2, "cursor": cursor}))
         .send()
         .await
         .unwrap();
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["vectors"].as_array().unwrap().len(), 2);
+    assert_eq!(body["records"].as_array().unwrap().len(), 2);
 
-    // Page 3: last page — 1 vector remains, no nextCursor
+    // Page 3: last page — 1 record remains, no nextCursor
     let cursor = body["nextCursor"].as_str().unwrap();
     let resp = client
-        .post(format!("{}/indexes/{name}/vectors/scroll", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/scroll",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({"limit": 2, "cursor": cursor}))
         .send()
         .await
         .unwrap();
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["vectors"].as_array().unwrap().len(), 1);
+    assert_eq!(body["records"].as_array().unwrap().len(), 1);
     assert!(body["nextCursor"].is_null() || body.get("nextCursor").is_none());
 
     common::cleanup_index(&server, &name).await;
@@ -548,10 +629,13 @@ async fn scroll_with_filter() {
     let client = Client::new();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"status": "active"}},
                 {"id": "v2", "values": [0.0, 1.0, 0.0], "metadata": {"status": "archived"}},
                 {"id": "v3", "values": [0.0, 0.0, 1.0], "metadata": {"status": "active"}},
@@ -562,7 +646,10 @@ async fn scroll_with_filter() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/vectors/scroll", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/scroll",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "filter": {"status": {"$eq": "active"}},
@@ -574,10 +661,10 @@ async fn scroll_with_filter() {
 
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
-    let vectors = body["vectors"].as_array().unwrap();
-    assert_eq!(vectors.len(), 2);
-    for v in vectors {
-        assert_eq!(v["metadata"]["status"], "active");
+    let records = body["records"].as_array().unwrap();
+    assert_eq!(records.len(), 2);
+    for r in records {
+        assert_eq!(r["metadata"]["status"], "active");
     }
 
     common::cleanup_index(&server, &name).await;
@@ -589,19 +676,22 @@ async fn sample_returns_random_vectors() {
     let name = common::create_test_index(&server, 3, "cosine").await;
     let client = Client::new();
 
-    let vectors: Vec<serde_json::Value> = (1..=20)
+    let records: Vec<serde_json::Value> = (1..=20)
         .map(|i| json!({"id": format!("v{i}"), "values": [1.0, 0.0, 0.0]}))
         .collect();
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
-        .json(&json!({"vectors": vectors}))
+        .json(&json!({"records": records}))
         .send()
         .await
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/sample", server.base_url))
+        .post(format!("{}/collections/{name}/sample", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({"size": 5, "includeMetadata": true}))
         .send()
@@ -610,9 +700,9 @@ async fn sample_returns_random_vectors() {
 
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
-    let vectors = body["vectors"].as_array().unwrap();
-    assert!(vectors.len() <= 5);
-    assert!(!vectors.is_empty());
+    let records = body["records"].as_array().unwrap();
+    assert!(records.len() <= 5);
+    assert!(!records.is_empty());
 
     common::cleanup_index(&server, &name).await;
 }
@@ -624,10 +714,13 @@ async fn sample_with_filter() {
     let client = Client::new();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"type": "a"}},
                 {"id": "v2", "values": [0.0, 1.0, 0.0], "metadata": {"type": "b"}},
                 {"id": "v3", "values": [0.0, 0.0, 1.0], "metadata": {"type": "a"}},
@@ -638,7 +731,7 @@ async fn sample_with_filter() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/sample", server.base_url))
+        .post(format!("{}/collections/{name}/sample", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "size": 10,
@@ -651,10 +744,10 @@ async fn sample_with_filter() {
 
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
-    let vectors = body["vectors"].as_array().unwrap();
-    assert_eq!(vectors.len(), 2);
-    for v in vectors {
-        assert_eq!(v["metadata"]["type"], "a");
+    let records = body["records"].as_array().unwrap();
+    assert_eq!(records.len(), 2);
+    for r in records {
+        assert_eq!(r["metadata"]["type"], "a");
     }
 
     common::cleanup_index(&server, &name).await;

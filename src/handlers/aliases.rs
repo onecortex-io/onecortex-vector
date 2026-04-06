@@ -7,14 +7,14 @@ use sqlx::Row;
 #[serde(rename_all = "camelCase")]
 pub struct CreateAliasRequest {
     pub alias: String,
-    pub index_name: String,
+    pub collection_name: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AliasResponse {
     pub alias: String,
-    pub index_name: String,
+    pub collection_name: String,
 }
 
 #[derive(Serialize)]
@@ -33,21 +33,21 @@ pub async fn create_alias(
         ));
     }
 
-    // Verify the target index exists and is ready
-    let _ = crate::handlers::vectors::resolve_index(&state.pool, &req.index_name).await?;
+    // Verify the target collection exists and is ready
+    let _ = crate::handlers::records::resolve_collection(&state.pool, &req.collection_name).await?;
 
     let row = sqlx::query(
         r#"
-        INSERT INTO _onecortex_vector.aliases (alias, index_name)
+        INSERT INTO _onecortex_vector.aliases (alias, collection_name)
         VALUES ($1, $2)
         ON CONFLICT (alias) DO UPDATE SET
-            index_name = EXCLUDED.index_name,
+            collection_name = EXCLUDED.collection_name,
             updated_at = now()
-        RETURNING alias, index_name
+        RETURNING alias, collection_name
         "#,
     )
     .bind(&req.alias)
-    .bind(&req.index_name)
+    .bind(&req.collection_name)
     .fetch_one(&state.pool)
     .await?;
 
@@ -55,7 +55,7 @@ pub async fn create_alias(
         axum::http::StatusCode::CREATED,
         Json(AliasResponse {
             alias: row.get("alias"),
-            index_name: row.get("index_name"),
+            collection_name: row.get("collection_name"),
         }),
     ))
 }
@@ -65,7 +65,7 @@ pub async fn list_aliases(
     State(state): State<AppState>,
 ) -> Result<Json<AliasListResponse>, ApiError> {
     let rows = sqlx::query(
-        "SELECT alias, index_name FROM _onecortex_vector.aliases ORDER BY created_at",
+        "SELECT alias, collection_name FROM _onecortex_vector.aliases ORDER BY created_at",
     )
     .fetch_all(&state.pool)
     .await?;
@@ -74,7 +74,7 @@ pub async fn list_aliases(
         .into_iter()
         .map(|r| AliasResponse {
             alias: r.get("alias"),
-            index_name: r.get("index_name"),
+            collection_name: r.get("collection_name"),
         })
         .collect();
 
@@ -87,7 +87,7 @@ pub async fn describe_alias(
     axum::extract::Path(alias): axum::extract::Path<String>,
 ) -> Result<Json<AliasResponse>, ApiError> {
     let row = sqlx::query(
-        "SELECT alias, index_name FROM _onecortex_vector.aliases WHERE alias = $1",
+        "SELECT alias, collection_name FROM _onecortex_vector.aliases WHERE alias = $1",
     )
     .bind(&alias)
     .fetch_optional(&state.pool)
@@ -96,7 +96,7 @@ pub async fn describe_alias(
 
     Ok(Json(AliasResponse {
         alias: row.get("alias"),
-        index_name: row.get("index_name"),
+        collection_name: row.get("collection_name"),
     }))
 }
 

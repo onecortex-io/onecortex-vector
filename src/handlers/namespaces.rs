@@ -3,16 +3,17 @@ use axum::{extract::State, Json};
 use serde::Deserialize;
 use sqlx::Row;
 
-/// GET /indexes/:name/namespaces
+/// GET /collections/:name/namespaces
 pub async fn list_namespaces(
     State(state): State<AppState>,
-    axum::extract::Path(index_name): axum::extract::Path<String>,
+    axum::extract::Path(collection_name): axum::extract::Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let index = crate::handlers::vectors::resolve_index(&state.pool, &index_name).await?;
+    let collection =
+        crate::handlers::records::resolve_collection(&state.pool, &collection_name).await?;
 
     let rows = sqlx::query(&format!(
-        "SELECT DISTINCT namespace FROM {}.vectors ORDER BY namespace",
-        index.schema_name
+        "SELECT DISTINCT namespace FROM {}.records ORDER BY namespace",
+        collection.schema_name
     ))
     .fetch_all(&state.pool)
     .await?;
@@ -27,24 +28,25 @@ pub struct CreateNamespaceRequest {
     pub name: String,
 }
 
-/// POST /indexes/:name/namespaces
+/// POST /collections/:name/namespaces
 pub async fn create_namespace(
     State(state): State<AppState>,
-    axum::extract::Path(index_name): axum::extract::Path<String>,
+    axum::extract::Path(collection_name): axum::extract::Path<String>,
     Json(req): Json<CreateNamespaceRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let index = crate::handlers::vectors::resolve_index(&state.pool, &index_name).await?;
+    let collection =
+        crate::handlers::records::resolve_collection(&state.pool, &collection_name).await?;
 
     // Namespaces are created implicitly on first upsert.
     // This endpoint ensures a stats row exists for the namespace.
     sqlx::query(
         r#"
-        INSERT INTO _onecortex_vector.index_stats (index_id, namespace, vector_count)
+        INSERT INTO _onecortex_vector.collection_stats (collection_id, namespace, record_count)
         VALUES ($1, $2, 0)
-        ON CONFLICT (index_id, namespace) DO NOTHING
+        ON CONFLICT (collection_id, namespace) DO NOTHING
         "#,
     )
-    .bind(index.id)
+    .bind(collection.id)
     .bind(&req.name)
     .execute(&state.pool)
     .await?;
@@ -55,51 +57,59 @@ pub async fn create_namespace(
     })))
 }
 
-/// GET /indexes/:name/namespaces/:ns
+/// GET /collections/:name/namespaces/:ns
 pub async fn describe_namespace(
     State(state): State<AppState>,
-    axum::extract::Path((index_name, ns)): axum::extract::Path<(String, String)>,
+    axum::extract::Path((collection_name, ns)): axum::extract::Path<(String, String)>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let index = crate::handlers::vectors::resolve_index(&state.pool, &index_name).await?;
+    let collection =
+        crate::handlers::records::resolve_collection(&state.pool, &collection_name).await?;
 
     let row = sqlx::query(
-        "SELECT namespace, vector_count FROM _onecortex_vector.index_stats WHERE index_id = $1 AND namespace = $2",
+        "SELECT namespace, record_count FROM _onecortex_vector.collection_stats WHERE collection_id = $1 AND namespace = $2",
     )
-    .bind(index.id)
+    .bind(collection.id)
     .bind(&ns)
     .fetch_optional(&state.pool)
     .await?
-    .ok_or_else(|| ApiError::NotFound(format!("Namespace '{ns}' not found in index '{index_name}'.")))?;
+    .ok_or_else(|| {
+        ApiError::NotFound(format!(
+            "Namespace '{ns}' not found in collection '{collection_name}'."
+        ))
+    })?;
 
     let namespace: String = row.get("namespace");
-    let vector_count: i64 = row.get("vector_count");
+    let record_count: i64 = row.get("record_count");
 
     Ok(Json(serde_json::json!({
         "name": namespace,
-        "record_count": vector_count,
+        "record_count": record_count,
     })))
 }
 
-/// DELETE /indexes/:name/namespaces/:ns
+/// DELETE /collections/:name/namespaces/:ns
 pub async fn delete_namespace(
     State(state): State<AppState>,
-    axum::extract::Path((index_name, ns)): axum::extract::Path<(String, String)>,
+    axum::extract::Path((collection_name, ns)): axum::extract::Path<(String, String)>,
 ) -> Result<(axum::http::StatusCode, Json<serde_json::Value>), ApiError> {
-    let index = crate::handlers::vectors::resolve_index(&state.pool, &index_name).await?;
+    let collection =
+        crate::handlers::records::resolve_collection(&state.pool, &collection_name).await?;
 
     sqlx::query(&format!(
-        "DELETE FROM {}.vectors WHERE namespace = $1",
-        index.schema_name
+        "DELETE FROM {}.records WHERE namespace = $1",
+        collection.schema_name
     ))
     .bind(&ns)
     .execute(&state.pool)
     .await?;
 
-    sqlx::query("DELETE FROM _onecortex_vector.index_stats WHERE index_id = $1 AND namespace = $2")
-        .bind(index.id)
-        .bind(&ns)
-        .execute(&state.pool)
-        .await?;
+    sqlx::query(
+        "DELETE FROM _onecortex_vector.collection_stats WHERE collection_id = $1 AND namespace = $2",
+    )
+    .bind(collection.id)
+    .bind(&ns)
+    .execute(&state.pool)
+    .await?;
 
     Ok((
         axum::http::StatusCode::ACCEPTED,

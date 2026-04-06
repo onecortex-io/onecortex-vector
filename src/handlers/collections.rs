@@ -5,7 +5,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
-pub struct CreateIndexRequest {
+pub struct CreateCollectionRequest {
     pub name: String,
     pub dimension: i32,
     #[serde(default = "default_metric")]
@@ -13,7 +13,7 @@ pub struct CreateIndexRequest {
     /// Accepted but ignored -- Onecortex is self-hosted, no cloud spec needed
     #[allow(dead_code)]
     pub spec: Option<serde_json::Value>,
-    /// Onecortex extension -- enables BM25 index on this index
+    /// Onecortex extension -- enables BM25 index on this collection
     pub bm25_enabled: Option<bool>,
     /// Accepted: "enabled" | "disabled" -- stored in deletion_protected column
     pub deletion_protection: Option<String>,
@@ -26,7 +26,7 @@ fn default_metric() -> String {
 }
 
 #[derive(Deserialize)]
-pub struct ConfigureIndexRequest {
+pub struct ConfigureCollectionRequest {
     pub deletion_protection: Option<String>,
     pub tags: Option<serde_json::Value>,
     #[serde(rename = "bm25Enabled")]
@@ -34,11 +34,11 @@ pub struct ConfigureIndexRequest {
 }
 
 #[derive(Serialize)]
-pub struct IndexResponse {
+pub struct CollectionResponse {
     pub name: String,
     pub dimension: i32,
     pub metric: String,
-    pub status: IndexStatus,
+    pub status: CollectionStatus,
     pub host: String,
     pub spec: serde_json::Value,
     pub vector_type: String,
@@ -49,33 +49,33 @@ pub struct IndexResponse {
 }
 
 #[derive(Serialize)]
-pub struct IndexStatus {
+pub struct CollectionStatus {
     pub ready: bool,
     pub state: String,
 }
 
 #[derive(Serialize)]
-pub struct IndexListResponse {
-    pub indexes: Vec<IndexResponse>,
+pub struct CollectionListResponse {
+    pub collections: Vec<CollectionResponse>,
 }
 
 #[derive(Serialize)]
-pub struct DescribeIndexStatsResponse {
+pub struct DescribeCollectionStatsResponse {
     pub namespaces: std::collections::HashMap<String, NamespaceSummary>,
     pub dimension: i32,
-    #[serde(rename = "indexFullness")]
-    pub index_fullness: f64,
-    #[serde(rename = "totalVectorCount")]
-    pub total_vector_count: i64,
+    #[serde(rename = "collectionFullness")]
+    pub collection_fullness: f64,
+    #[serde(rename = "totalRecordCount")]
+    pub total_record_count: i64,
 }
 
 #[derive(Serialize)]
 pub struct NamespaceSummary {
-    #[serde(rename = "vectorCount")]
-    pub vector_count: i64,
+    #[serde(rename = "recordCount")]
+    pub record_count: i64,
 }
 
-fn validate_index_name(name: &str) -> Result<(), ApiError> {
+fn validate_collection_name(name: &str) -> Result<(), ApiError> {
     let valid = !name.is_empty()
         && name.len() <= 45
         && name
@@ -85,7 +85,7 @@ fn validate_index_name(name: &str) -> Result<(), ApiError> {
         && !name.ends_with('-');
     if !valid {
         return Err(ApiError::InvalidArgument(
-            "index name must be 1-45 characters, lowercase alphanumeric and hyphens, \
+            "collection name must be 1-45 characters, lowercase alphanumeric and hyphens, \
              not starting or ending with a hyphen"
                 .to_string(),
         ));
@@ -93,12 +93,12 @@ fn validate_index_name(name: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// POST /indexes
-pub async fn create_index(
+/// POST /collections
+pub async fn create_collection(
     State(state): State<AppState>,
-    Json(req): Json<CreateIndexRequest>,
-) -> Result<(axum::http::StatusCode, Json<IndexResponse>), ApiError> {
-    validate_index_name(&req.name)?;
+    Json(req): Json<CreateCollectionRequest>,
+) -> Result<(axum::http::StatusCode, Json<CollectionResponse>), ApiError> {
+    validate_collection_name(&req.name)?;
     if req.dimension < 1 || req.dimension > 20_000 {
         return Err(ApiError::InvalidArgument(
             "dimension must be between 1 and 20000".to_string(),
@@ -110,20 +110,20 @@ pub async fn create_index(
         ));
     }
 
-    let index_id = Uuid::new_v4();
-    let schema_name = crate::db::lifecycle::schema_name_for(index_id);
+    let collection_id = Uuid::new_v4();
+    let schema_name = crate::db::lifecycle::schema_name_for(collection_id);
     let bm25_enabled = req.bm25_enabled.unwrap_or(false);
     let deletion_protected = req.deletion_protection.as_deref() == Some("enabled");
 
     // Insert into catalog -- unique constraint on name gives us 409 on duplicate
     let insert_result = sqlx::query(
         r#"
-        INSERT INTO _onecortex_vector.indexes
+        INSERT INTO _onecortex_vector.collections
             (id, name, dimension, metric, bm25_enabled, schema_name, deletion_protected, tags)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         "#,
     )
-    .bind(index_id)
+    .bind(collection_id)
     .bind(&req.name)
     .bind(req.dimension)
     .bind(&req.metric)
@@ -137,7 +137,7 @@ pub async fn create_index(
     match insert_result {
         Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
             return Err(ApiError::AlreadyExists(format!(
-                "Index '{}' already exists.",
+                "Collection '{}' already exists.",
                 req.name
             )));
         }
@@ -145,10 +145,10 @@ pub async fn create_index(
         Ok(_) => {}
     }
 
-    // Create the Postgres schema, vectors table, and DiskANN index
-    crate::db::lifecycle::create_index_schema(
+    // Create the Postgres schema, records table, and DiskANN index
+    crate::db::lifecycle::create_collection_schema(
         &state.pool,
-        index_id,
+        collection_id,
         &schema_name,
         req.dimension,
         &req.metric,
@@ -162,11 +162,11 @@ pub async fn create_index(
 
     Ok((
         axum::http::StatusCode::CREATED,
-        Json(IndexResponse {
+        Json(CollectionResponse {
             name: req.name,
             dimension: req.dimension,
             metric: req.metric,
-            status: IndexStatus {
+            status: CollectionStatus {
                 ready: true,
                 state: "Ready".to_string(),
             },
@@ -179,19 +179,19 @@ pub async fn create_index(
     ))
 }
 
-/// GET /indexes
-pub async fn list_indexes(
+/// GET /collections
+pub async fn list_collections(
     State(state): State<AppState>,
-) -> Result<Json<IndexListResponse>, ApiError> {
+) -> Result<Json<CollectionListResponse>, ApiError> {
     let rows = sqlx::query(
-        "SELECT name, dimension, metric, status, bm25_enabled, tags FROM _onecortex_vector.indexes ORDER BY created_at"
+        "SELECT name, dimension, metric, status, bm25_enabled, tags FROM _onecortex_vector.collections ORDER BY created_at"
     )
     .fetch_all(&state.pool)
     .await?;
 
     let host = format!("{}:{}", state.config.api_host, state.config.api_port);
 
-    let indexes = rows
+    let collections = rows
         .into_iter()
         .map(|r| {
             let name: String = r.get("name");
@@ -200,11 +200,11 @@ pub async fn list_indexes(
             let status_str: String = r.get("status");
             let bm25_enabled: bool = r.get("bm25_enabled");
             let tags: Option<serde_json::Value> = r.get("tags");
-            IndexResponse {
+            CollectionResponse {
                 name,
                 dimension,
                 metric,
-                status: IndexStatus {
+                status: CollectionStatus {
                     ready: status_str == "ready",
                     state: match status_str.as_str() {
                         "ready" => "Ready",
@@ -223,30 +223,30 @@ pub async fn list_indexes(
         })
         .collect();
 
-    Ok(Json(IndexListResponse { indexes }))
+    Ok(Json(CollectionListResponse { collections }))
 }
 
-/// GET /indexes/:name
-pub async fn describe_index(
+/// GET /collections/:name
+pub async fn describe_collection(
     State(state): State<AppState>,
     axum::extract::Path(name): axum::extract::Path<String>,
-) -> Result<Json<IndexResponse>, ApiError> {
+) -> Result<Json<CollectionResponse>, ApiError> {
     let row = sqlx::query(
-        "SELECT id, name, dimension, metric, status, bm25_enabled, tags FROM _onecortex_vector.indexes WHERE name = $1",
+        "SELECT id, name, dimension, metric, status, bm25_enabled, tags FROM _onecortex_vector.collections WHERE name = $1",
     )
     .bind(&name)
     .fetch_optional(&state.pool)
     .await?
-    .ok_or_else(|| ApiError::NotFound(format!("Index '{name}' does not exist.")))?;
+    .ok_or_else(|| ApiError::NotFound(format!("Collection '{name}' does not exist.")))?;
 
     let host = format!("{}:{}", state.config.api_host, state.config.api_port);
     let status_str: String = row.get("status");
 
-    Ok(Json(IndexResponse {
+    Ok(Json(CollectionResponse {
         name: row.get("name"),
         dimension: row.get("dimension"),
         metric: row.get("metric"),
-        status: IndexStatus {
+        status: CollectionStatus {
             ready: status_str == "ready",
             state: if status_str == "ready" {
                 "Ready".to_string()
@@ -262,39 +262,39 @@ pub async fn describe_index(
     }))
 }
 
-/// DELETE /indexes/:name
-pub async fn delete_index(
+/// DELETE /collections/:name
+pub async fn delete_collection(
     State(state): State<AppState>,
     axum::extract::Path(name): axum::extract::Path<String>,
 ) -> Result<(axum::http::StatusCode, Json<serde_json::Value>), ApiError> {
     let row = sqlx::query(
-        "SELECT id, schema_name, deletion_protected FROM _onecortex_vector.indexes WHERE name = $1",
+        "SELECT id, schema_name, deletion_protected FROM _onecortex_vector.collections WHERE name = $1",
     )
     .bind(&name)
     .fetch_optional(&state.pool)
     .await?
-    .ok_or_else(|| ApiError::NotFound(format!("Index '{name}' does not exist.")))?;
+    .ok_or_else(|| ApiError::NotFound(format!("Collection '{name}' does not exist.")))?;
 
     let deletion_protected: bool = row.get("deletion_protected");
     if deletion_protected {
         return Err(ApiError::PermissionDenied(format!(
-            "Index '{name}' has deletion protection enabled. Disable it before deleting."
+            "Collection '{name}' has deletion protection enabled. Disable it before deleting."
         )));
     }
 
-    let index_id: Uuid = row.get("id");
+    let collection_id: Uuid = row.get("id");
     let schema_name: String = row.get("schema_name");
 
     // Mark as deleting first
     sqlx::query(
-        "UPDATE _onecortex_vector.indexes SET status = 'deleting', updated_at = now() WHERE id = $1",
+        "UPDATE _onecortex_vector.collections SET status = 'deleting', updated_at = now() WHERE id = $1",
     )
-    .bind(index_id)
+    .bind(collection_id)
     .execute(&state.pool)
     .await?;
 
-    // Drop the schema -- this also deletes the row from _onecortex_vector.indexes
-    crate::db::lifecycle::drop_index_schema(&state.pool, index_id, &schema_name).await?;
+    // Drop the schema -- this also deletes the row from _onecortex_vector.collections
+    crate::db::lifecycle::drop_collection_schema(&state.pool, collection_id, &schema_name).await?;
 
     Ok((
         axum::http::StatusCode::ACCEPTED,
@@ -302,17 +302,17 @@ pub async fn delete_index(
     ))
 }
 
-/// PATCH /indexes/:name
-pub async fn configure_index(
+/// PATCH /collections/:name
+pub async fn configure_collection(
     State(state): State<AppState>,
     axum::extract::Path(name): axum::extract::Path<String>,
-    Json(req): Json<ConfigureIndexRequest>,
-) -> Result<Json<IndexResponse>, ApiError> {
+    Json(req): Json<ConfigureCollectionRequest>,
+) -> Result<Json<CollectionResponse>, ApiError> {
     let deletion_protected = req.deletion_protection.as_deref().map(|s| s == "enabled");
 
     let row = sqlx::query(
         r#"
-        UPDATE _onecortex_vector.indexes
+        UPDATE _onecortex_vector.collections
         SET
             deletion_protected = COALESCE($2, deletion_protected),
             tags               = COALESCE($3::jsonb, tags),
@@ -328,7 +328,7 @@ pub async fn configure_index(
     .bind(req.bm25_enabled)
     .fetch_optional(&state.pool)
     .await?
-    .ok_or_else(|| ApiError::NotFound(format!("Index '{name}' does not exist.")))?;
+    .ok_or_else(|| ApiError::NotFound(format!("Collection '{name}' does not exist.")))?;
 
     // If bm25_enabled was toggled, build or drop the BM25 index in the background.
     if let Some(bm25) = req.bm25_enabled {
@@ -349,11 +349,11 @@ pub async fn configure_index(
     let host = format!("{}:{}", state.config.api_host, state.config.api_port);
     let status_str: String = row.get("status");
 
-    Ok(Json(IndexResponse {
+    Ok(Json(CollectionResponse {
         name: row.get("name"),
         dimension: row.get("dimension"),
         metric: row.get("metric"),
-        status: IndexStatus {
+        status: CollectionStatus {
             ready: status_str == "ready",
             state: "Ready".to_string(),
         },
@@ -365,27 +365,27 @@ pub async fn configure_index(
     }))
 }
 
-/// POST /indexes/:name/describe_index_stats
-pub async fn describe_index_stats(
+/// POST /collections/:name/describe_collection_stats
+pub async fn describe_collection_stats(
     State(state): State<AppState>,
     axum::extract::Path(name): axum::extract::Path<String>,
     _body: Option<Json<serde_json::Value>>,
-) -> Result<Json<DescribeIndexStatsResponse>, ApiError> {
-    let index = sqlx::query(
-        "SELECT id, dimension, schema_name FROM _onecortex_vector.indexes WHERE name = $1",
+) -> Result<Json<DescribeCollectionStatsResponse>, ApiError> {
+    let collection = sqlx::query(
+        "SELECT id, dimension, schema_name FROM _onecortex_vector.collections WHERE name = $1",
     )
     .bind(&name)
     .fetch_optional(&state.pool)
     .await?
-    .ok_or_else(|| ApiError::NotFound(format!("Index '{name}' does not exist.")))?;
+    .ok_or_else(|| ApiError::NotFound(format!("Collection '{name}' does not exist.")))?;
 
-    let dimension: i32 = index.get("dimension");
-    let schema_name: String = index.get("schema_name");
+    let dimension: i32 = collection.get("dimension");
+    let schema_name: String = collection.get("schema_name");
 
-    // Query live vector counts per namespace directly from the vectors table
+    // Query live record counts per namespace directly from the records table
     // to avoid any async stats cache lag
     let stats = sqlx::query(&format!(
-        "SELECT namespace, COUNT(*) AS vector_count FROM {schema_name}.vectors GROUP BY namespace",
+        "SELECT namespace, COUNT(*) AS record_count FROM {schema_name}.records GROUP BY namespace",
     ))
     .fetch_all(&state.pool)
     .await?;
@@ -394,15 +394,15 @@ pub async fn describe_index_stats(
     let mut total = 0i64;
     for s in stats {
         let ns: String = s.get("namespace");
-        let vc: i64 = s.get("vector_count");
-        total += vc;
-        namespaces.insert(ns, NamespaceSummary { vector_count: vc });
+        let rc: i64 = s.get("record_count");
+        total += rc;
+        namespaces.insert(ns, NamespaceSummary { record_count: rc });
     }
 
-    Ok(Json(DescribeIndexStatsResponse {
+    Ok(Json(DescribeCollectionStatsResponse {
         namespaces,
         dimension,
-        index_fullness: 0.0,
-        total_vector_count: total,
+        collection_fullness: 0.0,
+        total_record_count: total,
     }))
 }

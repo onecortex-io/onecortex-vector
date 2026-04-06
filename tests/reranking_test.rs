@@ -13,10 +13,10 @@ async fn test_query_without_rerank_unchanged() {
     let client = Client::new();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!("{}/collections/{name}/records/upsert", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [0.1, 0.2, 0.3], "metadata": {"text": "quick fox"}}
             ]
         }))
@@ -25,7 +25,7 @@ async fn test_query_without_rerank_unchanged() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/query", server.base_url))
+        .post(format!("{}/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({"vector": [0.1, 0.2, 0.3], "topK": 1}))
         .send()
@@ -48,10 +48,10 @@ async fn test_rerank_top_n_truncates_results() {
     let client = Client::new();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!("{}/collections/{name}/records/upsert", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [0.1, 0.2, 0.3], "metadata": {"text": "fox"}},
                 {"id": "v2", "values": [0.4, 0.5, 0.6], "metadata": {"text": "dog"}},
                 {"id": "v3", "values": [0.7, 0.8, 0.9], "metadata": {"text": "cat"}},
@@ -62,7 +62,7 @@ async fn test_rerank_top_n_truncates_results() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/query", server.base_url))
+        .post(format!("{}/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [0.1, 0.2, 0.3],
@@ -88,10 +88,10 @@ async fn test_rerank_top_n_defaults_to_top_k() {
     let client = Client::new();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!("{}/collections/{name}/records/upsert", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [0.1, 0.2, 0.3], "metadata": {"text": "a"}},
                 {"id": "v2", "values": [0.4, 0.5, 0.6], "metadata": {"text": "b"}},
             ]
@@ -101,7 +101,7 @@ async fn test_rerank_top_n_defaults_to_top_k() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/query", server.base_url))
+        .post(format!("{}/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [0.1, 0.2, 0.3],
@@ -128,10 +128,10 @@ async fn test_rerank_missing_rank_field_falls_back_to_id() {
     let client = Client::new();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!("{}/collections/{name}/records/upsert", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [0.1, 0.2, 0.3], "metadata": {"category": "animals"}}
             ]
         }))
@@ -140,7 +140,7 @@ async fn test_rerank_missing_rank_field_falls_back_to_id() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/query", server.base_url))
+        .post(format!("{}/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [0.1, 0.2, 0.3],
@@ -165,10 +165,10 @@ async fn test_rerank_custom_rank_field() {
     let name = common::create_test_index(&server, 3, "cosine").await;
     let client = Client::new();
 
-    client.post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+    client.post(format!("{}/collections/{name}/records/upsert", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [0.1, 0.2, 0.3], "metadata": {"content": "machine learning models"}},
                 {"id": "v2", "values": [0.4, 0.5, 0.6], "metadata": {"content": "gardening tips"}},
             ]
@@ -176,7 +176,7 @@ async fn test_rerank_custom_rank_field() {
         .send().await.unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/query", server.base_url))
+        .post(format!("{}/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [0.1, 0.2, 0.3],
@@ -202,12 +202,12 @@ async fn test_hybrid_query_with_rerank() {
     let name = common::create_test_index_with_bm25(&server, 3, "cosine").await;
     let client = Client::new();
 
-    // Upsert vectors with text content for BM25
+    // Upsert records with text content for BM25
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!("{}/collections/{name}/records/upsert", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [0.1, 0.2, 0.3], "text": "the quick brown fox"},
                 {"id": "v2", "values": [0.4, 0.5, 0.6], "text": "lazy dog"},
                 {"id": "v3", "values": [0.7, 0.8, 0.9], "text": "fox hunting in autumn"},
@@ -218,7 +218,7 @@ async fn test_hybrid_query_with_rerank() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/query/hybrid", server.base_url))
+        .post(format!("{}/collections/{name}/query/hybrid", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [0.1, 0.2, 0.3],
@@ -241,16 +241,16 @@ async fn test_hybrid_query_with_rerank() {
 
 #[tokio::test]
 async fn test_rerank_top_n_larger_than_results_returns_all() {
-    // topN > actual number of vectors → returns however many exist.
+    // topN > actual number of records → returns however many exist.
     let server = common::start_test_server().await;
     let name = common::create_test_index(&server, 3, "cosine").await;
     let client = Client::new();
 
     client
-        .post(format!("{}/indexes/{name}/vectors/upsert", server.base_url))
+        .post(format!("{}/collections/{name}/records/upsert", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
-            "vectors": [
+            "records": [
                 {"id": "v1", "values": [0.1, 0.2, 0.3], "metadata": {"text": "only one"}}
             ]
         }))
@@ -259,7 +259,7 @@ async fn test_rerank_top_n_larger_than_results_returns_all() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/query", server.base_url))
+        .post(format!("{}/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [0.1, 0.2, 0.3],
@@ -283,7 +283,7 @@ async fn test_rerank_empty_index_returns_empty_matches() {
     let client = Client::new();
 
     let resp = client
-        .post(format!("{}/indexes/{name}/query", server.base_url))
+        .post(format!("{}/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [0.1, 0.2, 0.3],

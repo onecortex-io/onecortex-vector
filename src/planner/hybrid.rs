@@ -106,7 +106,7 @@ pub async fn hybrid_query(
                 ROW_NUMBER() OVER (
                     ORDER BY v.values {dist_op} $1::vector
                 ) AS dense_rank
-            FROM {schema_name}.vectors v
+            FROM {schema_name}.records v
             WHERE v.namespace = $2
               AND ({filter_sql})
             ORDER BY v.values {dist_op} $1::vector
@@ -119,7 +119,7 @@ pub async fn hybrid_query(
                 v.metadata,
                 v.values::text AS values_text,
                 (v.text_content <@> to_bm25query($4, '{schema_name}.{schema_name}_bm25_idx')) AS bm25_score
-            FROM {schema_name}.vectors v
+            FROM {schema_name}.records v
             WHERE v.namespace = $2
               AND v.text_content IS NOT NULL
               AND ({filter_sql})
@@ -190,7 +190,7 @@ pub async fn hybrid_query(
 
             let values: Option<Vec<f32>> = if req.include_values {
                 let v: Option<String> = row.get("values_text");
-                v.map(|s| crate::handlers::vectors::parse_pgvector_str(&s))
+                v.map(|s| crate::handlers::records::parse_pgvector_str(&s))
             } else {
                 None
             };

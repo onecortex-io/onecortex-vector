@@ -1,7 +1,7 @@
 pub mod admin;
 pub mod aliases;
+pub mod collections;
 pub mod health;
-pub mod indexes;
 pub mod namespaces;
 pub mod query;
-pub mod vectors;
+pub mod records;
