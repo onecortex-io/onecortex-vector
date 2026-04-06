@@ -111,10 +111,7 @@ fn build_public_router(state: state::AppState) -> Router {
         .route("/collections/:name/sample", post(records::sample_records))
         // Query
         .route("/collections/:name/query", post(query::query_vectors))
-        .route(
-            "/collections/:name/query/hybrid",
-            post(query::query_hybrid),
-        )
+        .route("/collections/:name/query/hybrid", post(query::query_hybrid))
         .route("/collections/:name/query/batch", post(query::query_batch))
         .route("/collections/:name/recommend", post(query::recommend))
         // Namespace CRUD
@@ -147,14 +144,8 @@ fn build_admin_router(state: state::AppState) -> Router {
     use handlers::{admin, health};
     Router::new()
         .route("/metrics", get(health::metrics))
-        .route(
-            "/admin/collections/:name/reindex",
-            post(admin::reindex),
-        )
-        .route(
-            "/admin/collections/:name/vacuum",
-            post(admin::vacuum),
-        )
+        .route("/admin/collections/:name/reindex", post(admin::reindex))
+        .route("/admin/collections/:name/vacuum", post(admin::vacuum))
         .route("/admin/api_keys", post(admin::create_api_key))
         .route("/admin/api_keys/:id", delete(admin::revoke_api_key))
         .route("/admin/config", get(admin::dump_config))

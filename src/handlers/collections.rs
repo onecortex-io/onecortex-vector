@@ -10,9 +10,6 @@ pub struct CreateCollectionRequest {
     pub dimension: i32,
     #[serde(default = "default_metric")]
     pub metric: String,
-    /// Accepted but ignored -- Onecortex is self-hosted, no cloud spec needed
-    #[allow(dead_code)]
-    pub spec: Option<serde_json::Value>,
     /// Onecortex extension -- enables BM25 index on this collection
     pub bm25_enabled: Option<bool>,
     /// Accepted: "enabled" | "disabled" -- stored in deletion_protected column
@@ -40,7 +37,6 @@ pub struct CollectionResponse {
     pub metric: String,
     pub status: CollectionStatus,
     pub host: String,
-    pub spec: serde_json::Value,
     pub vector_type: String,
     #[serde(rename = "bm25Enabled")]
     pub bm25_enabled: bool,
@@ -111,7 +107,6 @@ pub async fn create_collection(
     }
 
     let collection_id = Uuid::new_v4();
-    let schema_name = crate::db::lifecycle::schema_name_for(collection_id);
     let bm25_enabled = req.bm25_enabled.unwrap_or(false);
     let deletion_protected = req.deletion_protection.as_deref() == Some("enabled");
 
@@ -119,8 +114,8 @@ pub async fn create_collection(
     let insert_result = sqlx::query(
         r#"
         INSERT INTO _onecortex_vector.collections
-            (id, name, dimension, metric, bm25_enabled, schema_name, deletion_protected, tags)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            (id, name, dimension, metric, bm25_enabled, deletion_protected, tags)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#,
     )
     .bind(collection_id)
@@ -128,7 +123,6 @@ pub async fn create_collection(
     .bind(req.dimension)
     .bind(&req.metric)
     .bind(bm25_enabled)
-    .bind(&schema_name)
     .bind(deletion_protected)
     .bind(&req.tags)
     .execute(&state.pool)
@@ -145,11 +139,10 @@ pub async fn create_collection(
         Ok(_) => {}
     }
 
-    // Create the Postgres schema, records table, and DiskANN index
-    crate::db::lifecycle::create_collection_schema(
+    // Create the records table and DiskANN index in _onecortex_vector
+    crate::db::lifecycle::create_collection_table(
         &state.pool,
         collection_id,
-        &schema_name,
         req.dimension,
         &req.metric,
         state.config.default_diskann_neighbors,
@@ -171,7 +164,6 @@ pub async fn create_collection(
                 state: "Ready".to_string(),
             },
             host,
-            spec: serde_json::json!({}),
             vector_type: "dense".to_string(),
             bm25_enabled,
             tags: req.tags,
@@ -215,7 +207,6 @@ pub async fn list_collections(
                     .to_string(),
                 },
                 host: host.clone(),
-                spec: serde_json::json!({}),
                 vector_type: "dense".to_string(),
                 bm25_enabled,
                 tags,
@@ -255,7 +246,6 @@ pub async fn describe_collection(
             },
         },
         host,
-        spec: serde_json::json!({}),
         vector_type: "dense".to_string(),
         bm25_enabled: row.get("bm25_enabled"),
         tags: row.get("tags"),
@@ -268,7 +258,7 @@ pub async fn delete_collection(
     axum::extract::Path(name): axum::extract::Path<String>,
 ) -> Result<(axum::http::StatusCode, Json<serde_json::Value>), ApiError> {
     let row = sqlx::query(
-        "SELECT id, schema_name, deletion_protected FROM _onecortex_vector.collections WHERE name = $1",
+        "SELECT id, deletion_protected FROM _onecortex_vector.collections WHERE name = $1",
     )
     .bind(&name)
     .fetch_optional(&state.pool)
@@ -283,7 +273,6 @@ pub async fn delete_collection(
     }
 
     let collection_id: Uuid = row.get("id");
-    let schema_name: String = row.get("schema_name");
 
     // Mark as deleting first
     sqlx::query(
@@ -293,8 +282,8 @@ pub async fn delete_collection(
     .execute(&state.pool)
     .await?;
 
-    // Drop the schema -- this also deletes the row from _onecortex_vector.collections
-    crate::db::lifecycle::drop_collection_schema(&state.pool, collection_id, &schema_name).await?;
+    // Drop the table -- this also deletes the row from _onecortex_vector.collections
+    crate::db::lifecycle::drop_collection_table(&state.pool, collection_id).await?;
 
     Ok((
         axum::http::StatusCode::ACCEPTED,
@@ -319,7 +308,7 @@ pub async fn configure_collection(
             bm25_enabled       = COALESCE($4, bm25_enabled),
             updated_at         = now()
         WHERE name = $1
-        RETURNING id, name, dimension, metric, status, deletion_protected, bm25_enabled, schema_name, tags
+        RETURNING id, name, dimension, metric, status, deletion_protected, bm25_enabled, tags
         "#,
     )
     .bind(&name)
@@ -333,14 +322,14 @@ pub async fn configure_collection(
     // If bm25_enabled was toggled, build or drop the BM25 index in the background.
     if let Some(bm25) = req.bm25_enabled {
         let pool = state.pool.clone();
-        let schema_name: String = row.get("schema_name");
+        let collection_id: Uuid = row.get("id");
+        let table_name = crate::db::lifecycle::table_name_for(collection_id);
         tokio::spawn(async move {
             if bm25 {
-                if let Err(e) = crate::db::lifecycle::build_bm25_index(&pool, &schema_name).await {
+                if let Err(e) = crate::db::lifecycle::build_bm25_index(&pool, &table_name).await {
                     tracing::error!(error = %e, "BM25 index build failed");
                 }
-            } else if let Err(e) = crate::db::lifecycle::drop_bm25_index(&pool, &schema_name).await
-            {
+            } else if let Err(e) = crate::db::lifecycle::drop_bm25_index(&pool, &table_name).await {
                 tracing::error!(error = %e, "BM25 index drop failed");
             }
         });
@@ -358,7 +347,6 @@ pub async fn configure_collection(
             state: "Ready".to_string(),
         },
         host,
-        spec: serde_json::json!({}),
         vector_type: "dense".to_string(),
         bm25_enabled: row.get("bm25_enabled"),
         tags: row.get("tags"),
@@ -371,21 +359,21 @@ pub async fn describe_collection_stats(
     axum::extract::Path(name): axum::extract::Path<String>,
     _body: Option<Json<serde_json::Value>>,
 ) -> Result<Json<DescribeCollectionStatsResponse>, ApiError> {
-    let collection = sqlx::query(
-        "SELECT id, dimension, schema_name FROM _onecortex_vector.collections WHERE name = $1",
-    )
-    .bind(&name)
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| ApiError::NotFound(format!("Collection '{name}' does not exist.")))?;
+    let collection =
+        sqlx::query("SELECT id, dimension FROM _onecortex_vector.collections WHERE name = $1")
+            .bind(&name)
+            .fetch_optional(&state.pool)
+            .await?
+            .ok_or_else(|| ApiError::NotFound(format!("Collection '{name}' does not exist.")))?;
 
+    let collection_id: Uuid = collection.get("id");
     let dimension: i32 = collection.get("dimension");
-    let schema_name: String = collection.get("schema_name");
+    let table_name = crate::db::lifecycle::table_name_for(collection_id);
 
     // Query live record counts per namespace directly from the records table
     // to avoid any async stats cache lag
     let stats = sqlx::query(&format!(
-        "SELECT namespace, COUNT(*) AS record_count FROM {schema_name}.records GROUP BY namespace",
+        "SELECT namespace, COUNT(*) AS record_count FROM _onecortex.{table_name} GROUP BY namespace",
     ))
     .fetch_all(&state.pool)
     .await?;

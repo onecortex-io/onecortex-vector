@@ -30,26 +30,24 @@ async fn lifecycle_create_and_drop() {
         .unwrap();
 
     let collection_id = uuid::Uuid::new_v4();
-    let schema_name = onecortex_vector::db::lifecycle::schema_name_for(collection_id);
+    let table_name = onecortex_vector::db::lifecycle::table_name_for(collection_id);
 
     // First: insert a row into _onecortex_vector.collections so the FK and status update work
     sqlx::query(
-        "INSERT INTO _onecortex_vector.collections (id, name, dimension, metric, schema_name) VALUES ($1, $2, $3, $4, $5)"
+        "INSERT INTO _onecortex_vector.collections (id, name, dimension, metric) VALUES ($1, $2, $3, $4)"
     )
     .bind(collection_id)
     .bind(format!("test-{}", collection_id.simple()))
     .bind(3_i32)
     .bind("cosine")
-    .bind(&schema_name)
     .execute(&pool)
     .await
     .unwrap();
 
-    // Create the schema
-    onecortex_vector::db::lifecycle::create_collection_schema(
+    // Create the table
+    onecortex_vector::db::lifecycle::create_collection_table(
         &pool,
         collection_id,
-        &schema_name,
         3,
         "cosine",
         50,
@@ -59,15 +57,18 @@ async fn lifecycle_create_and_drop() {
     .await
     .unwrap();
 
-    // Verify schema exists
+    // Verify table exists in _onecortex_vector schema
     let (exists,): (bool,) = sqlx::query_as(
-        "SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = $1)",
+        "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema = '_onecortex' AND table_name = $1)",
     )
-    .bind(&schema_name)
+    .bind(&table_name)
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert!(exists, "Schema should exist after create");
+    assert!(
+        exists,
+        "Table should exist in _onecortex_vector after create"
+    );
 
     // Verify status is 'ready'
     let (status,): (String,) =
@@ -78,20 +79,20 @@ async fn lifecycle_create_and_drop() {
             .unwrap();
     assert_eq!(status, "ready");
 
-    // Drop the schema
-    onecortex_vector::db::lifecycle::drop_collection_schema(&pool, collection_id, &schema_name)
+    // Drop the table
+    onecortex_vector::db::lifecycle::drop_collection_table(&pool, collection_id)
         .await
         .unwrap();
 
-    // Verify schema is gone
+    // Verify table is gone
     let (exists_after,): (bool,) = sqlx::query_as(
-        "SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = $1)",
+        "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema = '_onecortex' AND table_name = $1)",
     )
-    .bind(&schema_name)
+    .bind(&table_name)
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert!(!exists_after, "Schema should be gone after drop");
+    assert!(!exists_after, "Table should be gone after drop");
 
     // Verify collection row is deleted
     let row: Option<(Uuid,)> =

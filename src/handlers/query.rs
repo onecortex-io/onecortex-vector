@@ -133,8 +133,8 @@ pub async fn query_vectors(
         vec.clone()
     } else if let Some(id) = &req.id {
         let row = sqlx::query(&format!(
-            "SELECT values::text FROM {}.records WHERE id = $1 AND namespace = $2",
-            collection.schema_name
+            "SELECT values::text FROM {} WHERE id = $1 AND namespace = $2",
+            collection.table_ref()
         ))
         .bind(id)
         .bind(&namespace)
@@ -220,13 +220,13 @@ pub async fn query_vectors(
         r#"
         SELECT id, {values_col}, {metadata_col},
                values {dist_op} $1::vector AS distance
-        FROM {}.records
+        FROM {}
         WHERE namespace = $2
           AND ({filter_sql})
         ORDER BY values {dist_op} $1::vector
         LIMIT $3
         "#,
-        collection.schema_name
+        collection.table_ref()
     );
 
     let mut query = sqlx::query(&sql)
@@ -258,8 +258,7 @@ pub async fn query_vectors(
             Match {
                 id,
                 score,
-                values: values_str
-                    .map(|s| crate::handlers::records::parse_pgvector_str(&s)),
+                values: values_str.map(|s| crate::handlers::records::parse_pgvector_str(&s)),
                 metadata,
             }
         })
@@ -413,7 +412,7 @@ pub async fn query_hybrid(
 
     let mut result = crate::planner::hybrid::hybrid_query(
         &state.pool,
-        &collection.schema_name,
+        &collection.table_ref(),
         &req,
         &collection.metric,
     )
@@ -515,6 +514,7 @@ pub async fn query_batch(
 
 /// Internal: execute a dense ANN query and return scored matches.
 /// Handles distance→score conversion but NOT reranking, score threshold, or grouping.
+#[allow(clippy::too_many_arguments)]
 async fn execute_ann_query(
     pool: &sqlx::PgPool,
     collection: &crate::handlers::records::CollectionMeta,
@@ -563,19 +563,16 @@ async fn execute_ann_query(
         r#"
         SELECT id, {values_col}, {metadata_col},
                values {dist_op} $1::vector AS distance
-        FROM {}.records
+        FROM {}
         WHERE namespace = $2
           AND ({filter_sql})
         ORDER BY values {dist_op} $1::vector
         LIMIT $3
         "#,
-        collection.schema_name
+        collection.table_ref()
     );
 
-    let mut query = sqlx::query(&sql)
-        .bind(&vec_str)
-        .bind(namespace)
-        .bind(top_k);
+    let mut query = sqlx::query(&sql).bind(&vec_str).bind(namespace).bind(top_k);
     for p in &filter_params {
         query = query.bind(p.as_str().unwrap_or(""));
     }
@@ -600,8 +597,7 @@ async fn execute_ann_query(
             Match {
                 id,
                 score,
-                values: values_str
-                    .map(|s| crate::handlers::records::parse_pgvector_str(&s)),
+                values: values_str.map(|s| crate::handlers::records::parse_pgvector_str(&s)),
                 metadata,
             }
         })
@@ -661,7 +657,7 @@ pub async fn recommend(
     let collection =
         crate::handlers::records::resolve_collection(&state.pool, &collection_name).await?;
     let namespace = req.namespace.clone().unwrap_or_default();
-    let schema = &collection.schema_name;
+    let table = collection.table_ref();
     let dim = collection.dimension as usize;
 
     // Fetch all positive and negative vectors
@@ -673,15 +669,14 @@ pub async fn recommend(
         .collect();
 
     let rows = sqlx::query(&format!(
-        "SELECT id, values::text FROM {schema}.records WHERE namespace = $1 AND id = ANY($2::text[])"
+        "SELECT id, values::text FROM {table} WHERE namespace = $1 AND id = ANY($2::text[])"
     ))
     .bind(&namespace)
     .bind(&all_ids)
     .fetch_all(&state.pool)
     .await?;
 
-    let mut vec_map: std::collections::HashMap<String, Vec<f32>> =
-        std::collections::HashMap::new();
+    let mut vec_map: std::collections::HashMap<String, Vec<f32>> = std::collections::HashMap::new();
     for row in &rows {
         let id: String = row.get("id");
         let values_str: String = row.get("values");

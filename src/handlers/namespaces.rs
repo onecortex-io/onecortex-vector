@@ -12,8 +12,8 @@ pub async fn list_namespaces(
         crate::handlers::records::resolve_collection(&state.pool, &collection_name).await?;
 
     let rows = sqlx::query(&format!(
-        "SELECT DISTINCT namespace FROM {}.records ORDER BY namespace",
-        collection.schema_name
+        "SELECT DISTINCT namespace FROM {} ORDER BY namespace",
+        collection.table_ref()
     ))
     .fetch_all(&state.pool)
     .await?;
@@ -96,8 +96,8 @@ pub async fn delete_namespace(
         crate::handlers::records::resolve_collection(&state.pool, &collection_name).await?;
 
     sqlx::query(&format!(
-        "DELETE FROM {}.records WHERE namespace = $1",
-        collection.schema_name
+        "DELETE FROM {} WHERE namespace = $1",
+        collection.table_ref()
     ))
     .bind(&ns)
     .execute(&state.pool)

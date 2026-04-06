@@ -21,9 +21,9 @@ cargo clippy -- -D warnings
 
 | Decision | Value |
 |---|---|
-| Catalog schema | `_onecortex_vector` |
-| Catalog tables | `collections`, `collection_stats`, `api_keys`, `aliases` |
-| Collection schemas | `col_<uuid>` (one per collection, contains a `records` table) |
+| Catalog schema | `_onecortex_vector` — system metadata only (collections, collection_stats, api_keys, aliases) |
+| User data schema | `_onecortex` — shared namespace for user-facing data across Onecortex services |
+| Collection tables | `_onecortex.col_<uuid>` (one table per collection) |
 | Column name for embeddings | `values` (not `embedding`) — matches Pinecone API field name |
 | DiskANN `num_neighbors` | 50 (not 64) |
 | RLS pattern | `set_config('app.current_namespace', $1, true)` inside `pool.begin()` — NEVER bare `SET` |

@@ -3,14 +3,11 @@ CREATE TABLE _onecortex_vector.collections (
     name                TEXT        NOT NULL UNIQUE
                                     CHECK (char_length(name) BETWEEN 1 AND 45),
     -- Vector dimension: 1 to 20,000.
-    -- Vector dimension: maximum 20,000.
     dimension           INT         NOT NULL
                                     CHECK (dimension BETWEEN 1 AND 20000),
     metric              TEXT        NOT NULL
                                     CHECK (metric IN ('cosine', 'euclidean', 'dotproduct')),
     bm25_enabled        BOOLEAN     NOT NULL DEFAULT FALSE,
-    -- Schema name for the per-collection records table, e.g. 'col_550e8400e29b41d4'
-    schema_name         TEXT        NOT NULL UNIQUE,
     status              TEXT        NOT NULL DEFAULT 'initializing'
                                     CHECK (status IN ('initializing', 'ready', 'deleting')),
     -- Deletion protection: when true, DELETE /collections/:name returns 403

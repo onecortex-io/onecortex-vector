@@ -11,7 +11,10 @@ async fn hybrid_query_requires_bm25_enabled() {
 
     // Upsert a record
     client
-        .post(format!("{}/collections/{name}/records/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
@@ -24,7 +27,10 @@ async fn hybrid_query_requires_bm25_enabled() {
 
     // Hybrid query on a non-BM25 collection should return 400
     let resp = client
-        .post(format!("{}/collections/{name}/query/hybrid", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/query/hybrid",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [0.1, 0.2, 0.3],
@@ -50,7 +56,10 @@ async fn hybrid_query_returns_results() {
 
     // Upsert records with text content
     client
-        .post(format!("{}/collections/{name}/records/upsert", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
@@ -64,7 +73,10 @@ async fn hybrid_query_returns_results() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/collections/{name}/query/hybrid", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/query/hybrid",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -102,7 +114,10 @@ async fn hybrid_query_topk_max_enforced() {
     let name = common::create_test_index_with_bm25(&server, 3, "cosine").await;
 
     let resp = client
-        .post(format!("{}/collections/{name}/query/hybrid", server.base_url))
+        .post(format!(
+            "{}/collections/{name}/query/hybrid",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [0.1, 0.2, 0.3],

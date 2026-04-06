@@ -97,19 +97,10 @@ fn build_test_router(state: onecortex_vector::state::AppState) -> axum::Router {
             "/collections/:name/records/scroll",
             post(records::scroll_records),
         )
-        .route(
-            "/collections/:name/sample",
-            post(records::sample_records),
-        )
+        .route("/collections/:name/sample", post(records::sample_records))
         .route("/collections/:name/query", post(query::query_vectors))
-        .route(
-            "/collections/:name/query/hybrid",
-            post(query::query_hybrid),
-        )
-        .route(
-            "/collections/:name/query/batch",
-            post(query::query_batch),
-        )
+        .route("/collections/:name/query/hybrid", post(query::query_hybrid))
+        .route("/collections/:name/query/batch", post(query::query_batch))
         .route("/collections/:name/recommend", post(query::recommend))
         .route(
             "/collections/:name/namespaces",

@@ -5,10 +5,17 @@ use sqlx::Row;
 
 pub struct CollectionMeta {
     pub id: uuid::Uuid,
-    pub schema_name: String,
     pub dimension: i32,
     pub metric: String,
     pub bm25_enabled: bool,
+}
+
+impl CollectionMeta {
+    /// Returns the fully-qualified table reference for this collection.
+    /// Format: "_onecortex.col_{uuid_simple}"
+    pub fn table_ref(&self) -> String {
+        format!("_onecortex.col_{}", self.id.simple())
+    }
 }
 
 pub async fn resolve_collection(
@@ -17,7 +24,7 @@ pub async fn resolve_collection(
 ) -> Result<CollectionMeta, ApiError> {
     // Try direct collection lookup first
     let row = sqlx::query(
-        "SELECT id, schema_name, dimension, metric, bm25_enabled \
+        "SELECT id, dimension, metric, bm25_enabled \
          FROM _onecortex_vector.collections WHERE name = $1 AND status = 'ready'",
     )
     .bind(name)
@@ -27,7 +34,6 @@ pub async fn resolve_collection(
     if let Some(row) = row {
         return Ok(CollectionMeta {
             id: row.get("id"),
-            schema_name: row.get("schema_name"),
             dimension: row.get("dimension"),
             metric: row.get("metric"),
             bm25_enabled: row.get("bm25_enabled"),
@@ -36,7 +42,7 @@ pub async fn resolve_collection(
 
     // Fall back to alias resolution: alias -> collection_name -> collection record
     let alias_row = sqlx::query(
-        "SELECT i.id, i.schema_name, i.dimension, i.metric, i.bm25_enabled \
+        "SELECT i.id, i.dimension, i.metric, i.bm25_enabled \
          FROM _onecortex_vector.aliases a \
          JOIN _onecortex_vector.collections i ON a.collection_name = i.name \
          WHERE a.alias = $1 AND i.status = 'ready'",
@@ -52,7 +58,6 @@ pub async fn resolve_collection(
 
     Ok(CollectionMeta {
         id: alias_row.get("id"),
-        schema_name: alias_row.get("schema_name"),
         dimension: alias_row.get("dimension"),
         metric: alias_row.get("metric"),
         bm25_enabled: alias_row.get("bm25_enabled"),
@@ -127,9 +132,9 @@ pub async fn upsert_records(
         }
     }
 
-    let schema = &collection.schema_name;
+    let table = collection.table_ref();
     let upsert_sql = format!(
-        "INSERT INTO {schema}.records (id, namespace, values, text_content, metadata, updated_at) VALUES "
+        "INSERT INTO {table} (id, namespace, values, text_content, metadata, updated_at) VALUES "
     );
 
     let mut qb = sqlx::QueryBuilder::new(upsert_sql);
@@ -170,12 +175,12 @@ pub async fn upsert_records(
     let pool = state.pool.clone();
     let collection_id = collection.id;
     let ns = namespace.clone();
-    let schema_clone = schema.clone();
+    let table_clone = table.clone();
     tokio::spawn(async move {
         let result = sqlx::query(&format!(
             r#"
             INSERT INTO _onecortex_vector.collection_stats (collection_id, namespace, record_count)
-            SELECT $1, $2, COUNT(*) FROM {schema_clone}.records WHERE namespace = $2
+            SELECT $1, $2, COUNT(*) FROM {table_clone} WHERE namespace = $2
             ON CONFLICT (collection_id, namespace)
             DO UPDATE SET record_count = EXCLUDED.record_count, updated_at = now()
             "#
@@ -217,8 +222,8 @@ pub async fn fetch_records(
     let namespace = req.namespace.unwrap_or_default();
 
     let rows = sqlx::query(&format!(
-        "SELECT id, values::text, metadata FROM {}.records WHERE namespace = $1 AND id = ANY($2::text[])",
-        collection.schema_name
+        "SELECT id, values::text, metadata FROM {} WHERE namespace = $1 AND id = ANY($2::text[])",
+        collection.table_ref()
     ))
     .bind(&namespace)
     .bind(&req.ids)
@@ -282,8 +287,8 @@ pub async fn fetch_by_metadata(
     };
 
     let sql = format!(
-        "SELECT id, {values_col}, metadata FROM {}.records WHERE namespace = $1 AND ({filter_sql}) LIMIT {limit}",
-        collection.schema_name
+        "SELECT id, {values_col}, metadata FROM {} WHERE namespace = $1 AND ({filter_sql}) LIMIT {limit}",
+        collection.table_ref()
     );
 
     let mut query = sqlx::query(&sql).bind(&namespace);
@@ -329,15 +334,13 @@ pub async fn delete_records(
 ) -> Result<(axum::http::StatusCode, Json<serde_json::Value>), ApiError> {
     let collection = resolve_collection(&state.pool, &collection_name).await?;
     let namespace = req.namespace.unwrap_or_default();
-    let schema = &collection.schema_name;
+    let table = collection.table_ref();
 
     if req.delete_all == Some(true) {
-        sqlx::query(&format!(
-            "DELETE FROM {schema}.records WHERE namespace = $1"
-        ))
-        .bind(&namespace)
-        .execute(&state.pool)
-        .await?;
+        sqlx::query(&format!("DELETE FROM {table} WHERE namespace = $1"))
+            .bind(&namespace)
+            .execute(&state.pool)
+            .await?;
     } else if let Some(ids) = &req.ids {
         if ids.len() > 1000 {
             return Err(ApiError::InvalidArgument(
@@ -345,7 +348,7 @@ pub async fn delete_records(
             ));
         }
         sqlx::query(&format!(
-            "DELETE FROM {schema}.records WHERE namespace = $1 AND id = ANY($2::text[])"
+            "DELETE FROM {table} WHERE namespace = $1 AND id = ANY($2::text[])"
         ))
         .bind(&namespace)
         .bind(ids)
@@ -355,8 +358,7 @@ pub async fn delete_records(
         let (filter_sql, filter_params) =
             crate::planner::filter_translator::translate_filter(filter, 1)
                 .map_err(|e| ApiError::InvalidArgument(e.to_string()))?;
-        let sql =
-            format!("DELETE FROM {schema}.records WHERE namespace = $1 AND ({filter_sql})");
+        let sql = format!("DELETE FROM {table} WHERE namespace = $1 AND ({filter_sql})");
         let mut q = sqlx::query(&sql).bind(&namespace);
         for p in &filter_params {
             q = q.bind(p.as_str().unwrap_or(""));
@@ -391,7 +393,7 @@ pub async fn update_record(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let collection = resolve_collection(&state.pool, &collection_name).await?;
     let namespace = req.namespace.unwrap_or_default();
-    let schema = &collection.schema_name;
+    let table = collection.table_ref();
 
     let embedding_str = req.values.as_ref().map(|v| {
         format!(
@@ -406,7 +408,7 @@ pub async fn update_record(
     // metadata is MERGED (JSONB ||), not replaced
     let result = sqlx::query(&format!(
         r#"
-        UPDATE {schema}.records SET
+        UPDATE {table} SET
             values       = CASE WHEN $3::text IS NOT NULL THEN $3::vector ELSE values END,
             text_content = CASE WHEN $4::text IS NOT NULL THEN $4       ELSE text_content END,
             metadata     = COALESCE(metadata, '{{}}'::jsonb) || COALESCE($5::jsonb, '{{}}'::jsonb),
@@ -450,10 +452,10 @@ pub async fn list_records(
         .unwrap_or(100)
         .min(1000);
     let cursor = params.get("paginationToken").cloned().unwrap_or_default();
-    let schema = &collection.schema_name;
+    let table = collection.table_ref();
 
     let rows = sqlx::query(&format!(
-        "SELECT id FROM {schema}.records WHERE namespace = $1 AND id LIKE $2 AND id > $3 ORDER BY id LIMIT $4"
+        "SELECT id FROM {table} WHERE namespace = $1 AND id LIKE $2 AND id > $3 ORDER BY id LIMIT $4"
     ))
     .bind(&namespace)
     .bind(format!("{prefix}%"))
@@ -541,7 +543,7 @@ pub async fn scroll_records(
     let limit = req.limit.clamp(1, 1000);
     let collection = resolve_collection(&state.pool, &collection_name).await?;
     let namespace = req.namespace.unwrap_or_default();
-    let schema = &collection.schema_name;
+    let table = collection.table_ref();
     let cursor = req.cursor.unwrap_or_default();
 
     let values_col = if req.include_values {
@@ -567,7 +569,7 @@ pub async fn scroll_records(
     let sql = format!(
         r#"
         SELECT id, {values_col}, {metadata_col}
-        FROM {schema}.records
+        FROM {table}
         WHERE namespace = $1
           AND id > $2
           AND ({filter_sql})
@@ -648,7 +650,7 @@ pub async fn sample_records(
     let size = req.size.clamp(1, 1000);
     let collection = resolve_collection(&state.pool, &collection_name).await?;
     let namespace = req.namespace.unwrap_or_default();
-    let schema = &collection.schema_name;
+    let table = collection.table_ref();
 
     let values_col = if req.include_values {
         "values::text"
@@ -671,7 +673,7 @@ pub async fn sample_records(
     let sql = format!(
         r#"
         SELECT id, {values_col}, {metadata_col}
-        FROM {schema}.records
+        FROM {table}
         WHERE namespace = $1
           AND ({filter_sql})
         ORDER BY random()

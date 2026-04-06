@@ -299,7 +299,7 @@ Client → REST API (axum) → PostgreSQL 18
                               └── pg_textsearch (BM25 full-text search)
 ```
 
-Each collection gets its own PostgreSQL schema (`col_<uuid>`), providing full isolation. Collection metadata is tracked in the `_onecortex_vector` catalog schema. Migrations are managed by sqlx and applied automatically on server startup.
+Two PostgreSQL schemas are used: `_onecortex_vector` holds the system catalog (collections, api_keys, aliases, stats), and `_onecortex` holds user data — one table per collection named `col_<uuid>`. Keeping user data in `_onecortex` allows other Onecortex services on the same PostgreSQL instance to store their own data under the same shared namespace. Migrations are managed by sqlx and applied automatically on server startup.
 
 ## Development
 

@@ -55,7 +55,7 @@ pub struct HybridQueryResponse {
 /// that higher relevance = higher positive number, then rank descending.
 pub async fn hybrid_query(
     pool: &PgPool,
-    schema_name: &str,
+    table_ref: &str,
     req: &HybridQueryRequest,
     metric: &str,
 ) -> Result<HybridQueryResponse, crate::error::ApiError> {
@@ -94,7 +94,7 @@ pub async fn hybrid_query(
 
     // Build the RRF SQL with three CTEs.
     // Alpha, bm25_weight, and rrf_k are server-computed floats interpolated via format!().
-    // Schema name and distance operator are also interpolated (validated internally).
+    // Table reference and distance operator are also interpolated (validated internally).
     let sql = format!(
         r#"
         WITH ann_results AS (
@@ -106,7 +106,7 @@ pub async fn hybrid_query(
                 ROW_NUMBER() OVER (
                     ORDER BY v.values {dist_op} $1::vector
                 ) AS dense_rank
-            FROM {schema_name}.records v
+            FROM {table_ref} v
             WHERE v.namespace = $2
               AND ({filter_sql})
             ORDER BY v.values {dist_op} $1::vector
@@ -118,12 +118,12 @@ pub async fn hybrid_query(
                 v.namespace,
                 v.metadata,
                 v.values::text AS values_text,
-                (v.text_content <@> to_bm25query($4, '{schema_name}.{schema_name}_bm25_idx')) AS bm25_score
-            FROM {schema_name}.records v
+                (v.text_content <@> to_bm25query($4, '{table_ref}_bm25_idx')) AS bm25_score
+            FROM {table_ref} v
             WHERE v.namespace = $2
               AND v.text_content IS NOT NULL
               AND ({filter_sql})
-            ORDER BY v.text_content <@> to_bm25query($4, '{schema_name}.{schema_name}_bm25_idx')
+            ORDER BY v.text_content <@> to_bm25query($4, '{table_ref}_bm25_idx')
             LIMIT $3
         ),
         bm25_results AS (
