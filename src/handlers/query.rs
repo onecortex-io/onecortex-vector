@@ -606,6 +606,118 @@ async fn execute_ann_query(
     Ok(matches)
 }
 
+// --- Faceted Counts ---
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FacetsRequest {
+    pub field: String,
+    pub filter: Option<serde_json::Value>,
+    pub namespace: Option<String>,
+    #[serde(default = "default_facet_limit")]
+    pub limit: i64,
+}
+
+fn default_facet_limit() -> i64 {
+    20
+}
+
+#[derive(Serialize)]
+pub struct FacetEntry {
+    pub value: String,
+    pub count: i64,
+}
+
+#[derive(Serialize)]
+pub struct FacetsResponse {
+    pub facets: Vec<FacetEntry>,
+    pub field: String,
+    pub namespace: String,
+}
+
+/// POST /collections/:name/facets
+pub async fn facets(
+    State(state): State<AppState>,
+    axum::extract::Path(collection_name): axum::extract::Path<String>,
+    Json(req): Json<FacetsRequest>,
+) -> Result<Json<FacetsResponse>, ApiError> {
+    // Validate field name — it is embedded directly in SQL (JSONB operators cannot be parameterized)
+    if req.field.is_empty() || req.field.len() > 100 {
+        return Err(ApiError::InvalidArgument(
+            "field must be between 1 and 100 characters".to_string(),
+        ));
+    }
+    let valid = {
+        let mut chars = req.field.chars();
+        let first_ok = chars
+            .next()
+            .map(|c| c.is_ascii_alphabetic() || c == '_')
+            .unwrap_or(false);
+        first_ok && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+    };
+    if !valid {
+        return Err(ApiError::InvalidArgument(
+            "field must start with a letter or underscore and contain only letters, digits, underscores, or dots".to_string(),
+        ));
+    }
+    if req.limit < 1 || req.limit > 100 {
+        return Err(ApiError::InvalidArgument(
+            "limit must be between 1 and 100".to_string(),
+        ));
+    }
+
+    let collection =
+        crate::handlers::records::resolve_collection(&state.pool, &collection_name).await?;
+    let namespace = req.namespace.unwrap_or_default();
+    let table = collection.table_ref();
+    let limit = req.limit;
+
+    let field_accessor =
+        crate::planner::filter_translator::jsonb_field_accessor(&req.field);
+
+    let (filter_sql, filter_params) = if let Some(f) = &req.filter {
+        crate::planner::filter_translator::translate_filter(f, 1)
+            .map_err(|e| ApiError::InvalidArgument(e.to_string()))?
+    } else {
+        ("TRUE".to_string(), vec![])
+    };
+
+    let sql = format!(
+        r#"
+        SELECT {field_accessor} AS value, COUNT(*) AS count
+        FROM {table}
+        WHERE namespace = $1
+          AND ({filter_sql})
+          AND {field_accessor} IS NOT NULL
+        GROUP BY {field_accessor}
+        ORDER BY count DESC
+        LIMIT {limit}
+        "#
+    );
+
+    let mut query = sqlx::query(&sql).bind(&namespace);
+    for p in &filter_params {
+        query = query.bind(p.as_str().unwrap_or(""));
+    }
+
+    let rows = query.fetch_all(&state.pool).await?;
+
+    let facet_entries: Vec<FacetEntry> = rows
+        .into_iter()
+        .map(|row| {
+            let value: String = row.get("value");
+            let count: i64 = row.get("count");
+            FacetEntry { value, count }
+        })
+        .collect();
+
+    Ok(Json(FacetsResponse {
+        facets: facet_entries,
+        field: req.field,
+        namespace,
+    }))
+}
+
 // --- Recommendation API ---
 
 #[derive(Deserialize)]

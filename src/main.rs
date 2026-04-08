@@ -114,6 +114,7 @@ fn build_public_router(state: state::AppState) -> Router {
         .route("/collections/:name/query/hybrid", post(query::query_hybrid))
         .route("/collections/:name/query/batch", post(query::query_batch))
         .route("/collections/:name/recommend", post(query::recommend))
+        .route("/collections/:name/facets", post(query::facets))
         // Namespace CRUD
         .route(
             "/collections/:name/namespaces",

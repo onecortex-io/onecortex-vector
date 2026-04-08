@@ -102,6 +102,7 @@ fn build_test_router(state: onecortex_vector::state::AppState) -> axum::Router {
         .route("/collections/:name/query/hybrid", post(query::query_hybrid))
         .route("/collections/:name/query/batch", post(query::query_batch))
         .route("/collections/:name/recommend", post(query::recommend))
+        .route("/collections/:name/facets", post(query::facets))
         .route(
             "/collections/:name/namespaces",
             get(namespaces::list_namespaces).post(namespaces::create_namespace),

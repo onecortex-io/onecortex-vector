@@ -3,6 +3,253 @@ mod common;
 use reqwest::Client;
 use serde_json::json;
 
+// --- Faceted Counts ---
+
+#[tokio::test]
+async fn facets_basic_counts() {
+    let server = common::start_test_server().await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    client
+        .post(format!(
+            "{}/collections/{collection}/records/upsert",
+            server.base_url
+        ))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({
+            "records": [
+                {"id": "r1", "values": [1.0, 0.0, 0.0], "metadata": {"category": "Electronics"}},
+                {"id": "r2", "values": [0.9, 0.1, 0.0], "metadata": {"category": "Electronics"}},
+                {"id": "r3", "values": [0.8, 0.2, 0.0], "metadata": {"category": "Books"}},
+                {"id": "r4", "values": [0.7, 0.3, 0.0], "metadata": {"category": "Electronics"}},
+                {"id": "r5", "values": [0.6, 0.4, 0.0], "metadata": {"category": "Books"}},
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    let resp = client
+        .post(format!("{}/collections/{collection}/facets", server.base_url))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({"field": "category"}))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+
+    assert_eq!(body["field"], "category");
+    let facets = body["facets"].as_array().unwrap();
+    assert_eq!(facets.len(), 2);
+    // Ordered by count DESC: Electronics(3) before Books(2)
+    assert_eq!(facets[0]["value"], "Electronics");
+    assert_eq!(facets[0]["count"], 3);
+    assert_eq!(facets[1]["value"], "Books");
+    assert_eq!(facets[1]["count"], 2);
+
+    common::cleanup_index(&server, &collection).await;
+}
+
+#[tokio::test]
+async fn facets_with_filter() {
+    let server = common::start_test_server().await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    client
+        .post(format!(
+            "{}/collections/{collection}/records/upsert",
+            server.base_url
+        ))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({
+            "records": [
+                {"id": "r1", "values": [1.0, 0.0, 0.0], "metadata": {"category": "Electronics", "in_stock": "true"}},
+                {"id": "r2", "values": [0.9, 0.1, 0.0], "metadata": {"category": "Books",       "in_stock": "true"}},
+                {"id": "r3", "values": [0.8, 0.2, 0.0], "metadata": {"category": "Electronics", "in_stock": "false"}},
+                {"id": "r4", "values": [0.7, 0.3, 0.0], "metadata": {"category": "Books",       "in_stock": "false"}},
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // Facet on category, but only for in_stock=true records
+    let resp = client
+        .post(format!("{}/collections/{collection}/facets", server.base_url))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({
+            "field": "category",
+            "filter": {"in_stock": {"$eq": "true"}}
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let facets = body["facets"].as_array().unwrap();
+    // Only 2 records pass the filter, one per category
+    assert_eq!(facets.len(), 2);
+    for f in facets {
+        assert_eq!(f["count"], 1);
+    }
+
+    common::cleanup_index(&server, &collection).await;
+}
+
+#[tokio::test]
+async fn facets_excludes_records_missing_field() {
+    let server = common::start_test_server().await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    client
+        .post(format!(
+            "{}/collections/{collection}/records/upsert",
+            server.base_url
+        ))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({
+            "records": [
+                {"id": "r1", "values": [1.0, 0.0, 0.0], "metadata": {"category": "Electronics"}},
+                {"id": "r2", "values": [0.9, 0.1, 0.0], "metadata": {"other_field": "x"}},
+                {"id": "r3", "values": [0.8, 0.2, 0.0]},
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    let resp = client
+        .post(format!("{}/collections/{collection}/facets", server.base_url))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({"field": "category"}))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let facets = body["facets"].as_array().unwrap();
+    // Only r1 has "category"; r2 and r3 should be excluded (not a null bucket)
+    assert_eq!(facets.len(), 1);
+    assert_eq!(facets[0]["value"], "Electronics");
+    assert_eq!(facets[0]["count"], 1);
+
+    common::cleanup_index(&server, &collection).await;
+}
+
+#[tokio::test]
+async fn facets_respects_limit() {
+    let server = common::start_test_server().await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    // 5 distinct categories, 1 record each
+    let records: Vec<serde_json::Value> = ["A", "B", "C", "D", "E"]
+        .iter()
+        .enumerate()
+        .map(|(i, cat)| {
+            json!({
+                "id": format!("r{i}"),
+                "values": [1.0 - i as f32 * 0.1, i as f32 * 0.1, 0.0],
+                "metadata": {"category": cat}
+            })
+        })
+        .collect();
+    client
+        .post(format!(
+            "{}/collections/{collection}/records/upsert",
+            server.base_url
+        ))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({"records": records}))
+        .send()
+        .await
+        .unwrap();
+
+    let resp = client
+        .post(format!("{}/collections/{collection}/facets", server.base_url))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({"field": "category", "limit": 3}))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["facets"].as_array().unwrap().len(), 3);
+
+    common::cleanup_index(&server, &collection).await;
+}
+
+#[tokio::test]
+async fn facets_empty_collection_returns_empty() {
+    let server = common::start_test_server().await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    let resp = client
+        .post(format!("{}/collections/{collection}/facets", server.base_url))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({"field": "category"}))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["facets"].as_array().unwrap().len(), 0);
+
+    common::cleanup_index(&server, &collection).await;
+}
+
+#[tokio::test]
+async fn facets_invalid_field_name_returns_400() {
+    let server = common::start_test_server().await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    for bad_field in &["bad field", "'; DROP TABLE--", "123starts_with_digit", ""] {
+        let resp = client
+            .post(format!("{}/collections/{collection}/facets", server.base_url))
+            .header("Api-Key", &server.api_key)
+            .json(&json!({"field": bad_field}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            400,
+            "Expected 400 for field={bad_field:?}"
+        );
+    }
+
+    common::cleanup_index(&server, &collection).await;
+}
+
+#[tokio::test]
+async fn facets_limit_out_of_range_returns_400() {
+    let server = common::start_test_server().await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    let resp = client
+        .post(format!("{}/collections/{collection}/facets", server.base_url))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({"field": "category", "limit": 101}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 400);
+
+    common::cleanup_index(&server, &collection).await;
+}
+
 #[tokio::test]
 async fn query_cosine() {
     let server = common::start_test_server().await;

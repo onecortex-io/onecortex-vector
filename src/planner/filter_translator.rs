@@ -122,7 +122,7 @@ pub fn translate_filter(
 /// Convert a field name (possibly nested with dots) to a JSONB accessor expression.
 /// "category" -> "metadata->>'category'"
 /// "user.role" -> "metadata->'user'->>'role'"
-fn jsonb_field_accessor(field: &str) -> String {
+pub(crate) fn jsonb_field_accessor(field: &str) -> String {
     let parts: Vec<&str> = field.split('.').collect();
     if parts.len() == 1 {
         return format!("metadata->>'{}'", parts[0]);

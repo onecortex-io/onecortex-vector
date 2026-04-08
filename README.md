@@ -1,21 +1,44 @@
 # Onecortex Vector
 
-High performance (⚡) vector database built in Rust (🦀) on PostgreSQL. Simple Pinecone like API with dense vector and hybrid search (🔎), plus rich metadata filtering, namespace support, and advanced retrieval features.
+High performance (⚡) vector database built in Rust (🦀) on PostgreSQL. Simple API with dense vector and hybrid search (🔎), plus rich metadata filtering, namespace support, and advanced retrieval features.
+
+---
+
+## The Problem
+
+Building AI applications with RAG pipelines, semantic search, and recommendation engines is deceptively simple in a demo but surprisingly difficult in production. Developers typically hit five major roadblocks mentioned below:
+
+- **Precision Failures:** Pure vector search excels at semantic meaning but fails at exact details. It struggles to distinguish between similar identifiers (e.g., `invoice #123456` vs. `invoice #123457`) and misses rare technical terms. This leads to LLM hallucinations in RAG setups.
+- **Architectural Complexity:** High quality retrieval requires "Hybrid Search," which usually means bolting together separate vector and full-text search systems. Managing this merge logic and re-ranking layers transforms a simple query into a complex distributed pipeline.
+- **Fragmented Infrastructure:**
+    * **Managed Services:** Like Pinecone and Qdrant leads to high costs and proprietary vendor lock-in.
+    * **Self-Hosted Engines:** Like Milvus and Weaviate require orchestrating heavy, stateful components like etcd and message queues. Qdrant is open source but event that forces you to manage complex infrastructure stack outside your primary database.
+- **Unpredictable Scaling:** Combining metadata filters with vector search is a major bottleneck. Most systems suffer from unpredictable latency and degraded recall as datasets grow from thousands to millions of records.
+- **Consistency & Maintenance:** Most vector databases struggle with continuous updates and data shifts. Upgrading embedding models or handling real-time inserts often leads to silent precision drops with no easy way to roll back.
+
+**The result** is that Engineering teams spend more time managing retrieval infrastructure than building their actual product.
+
+**Onecortex Vector** is built to change that: a self-hosted vector database built on **PostgreSQL** that handles the full retrieval stack - dense vector search, hybrid BM25 fusion, re-ranking, and rich filtering without the overhead of a distributed system to run at scale.
+
+---
 
 ## Features
 
-- **Dense ANN search** — cosine, euclidean, and dot product similarity via StreamingDiskANN
-- **Hybrid search** — combine dense vector similarity with BM25 text search using Reciprocal Rank Fusion (RRF)
-- **Reranking** — plug in Cohere, Voyage, Jina, Pinecone Inference, or a self-hosted cross-encoder to rerank results with natural language queries
-- **Metadata filtering** — rich query DSL with `$eq`, `$ne`, `$gt`, `$lt`, `$in`, `$nin`, `$and`, `$or` operators
-- **Namespaces** — isolate data within a collection using scoped operations by namespace
-- **Batch queries** — fan out up to 10 queries in a single request with concurrent execution
-- **Scroll & sample** — paginate over all records or draw a random sample, both with full filter support
-- **Score threshold** — filter results by minimum similarity score, applied after reranking
-- **GroupBy** — group nearest-neighbor results by any metadata field to avoid same-source clustering
-- **Recommendations** — find similar items from positive/negative example IDs without supplying a query vector
-- **Collection aliases** — point a named alias at any collection for zero-downtime swaps and A/B testing
-- **Self-hosted** — runs on your own PostgreSQL instance, no vendor lock-in
+- **Dense ANN search:** cosine, euclidean, and dot product similarity via StreamingDiskANN
+- **Hybrid search:** combine dense vector similarity with BM25 text search using Reciprocal Rank Fusion (RRF)
+- **Reranking:** plug in Cohere, Voyage, Jina, Pinecone Inference, or a self-hosted cross-encoder to rerank results with natural language queries
+- **Metadata filtering:** rich query DSL with `$eq`, `$ne`, `$gt`, `$lt`, `$in`, `$nin`, `$and`, `$or` operators
+- **Namespaces:** isolate data within a collection using scoped operations by namespace
+- **Batch queries:** fan out up to 10 queries in a single request with concurrent execution
+- **Scroll & sample:** paginate over all records or draw a random sample, both with full filter support
+- **Score threshold:** filter results by minimum similarity score, applied after reranking
+- **GroupBy:** group nearest-neighbor results by any metadata field to avoid same-source clustering
+- **Faceted counts:** aggregate counts of distinct metadata values for any field, optionally scoped to a filter — powers category sidebars and filter UIs in a single request
+- **Recommendations:** find similar items from positive/negative example IDs without supplying a query vector
+- **Collection aliases:** point a named alias at any collection for zero-downtime swaps and A/B testing
+- **Self-hosted:** runs on your own PostgreSQL instance, no vendor lock-in
+
+---
 
 ## Quick Start
 
@@ -107,6 +130,7 @@ All data-plane endpoints require an `Api-Key` header.
 | POST | `/collections/:name/query/hybrid` | Hybrid dense + BM25 query |
 | POST | `/collections/:name/query/batch` | Run up to 10 queries concurrently |
 | POST | `/collections/:name/recommend` | Recommend by positive/negative example IDs |
+| POST | `/collections/:name/facets` | Aggregated counts of distinct metadata values |
 
 ### Namespaces
 
@@ -240,6 +264,16 @@ curl -s -X POST http://localhost:8080/collections/my-collection/recommend \
   -H "Content-Type: application/json" \
   -d '{"positiveIds":["rec-1","rec-2"],"negativeIds":["rec-9"],"topK":10}'
 ```
+
+### Faceted Counts
+
+Get aggregated counts of distinct metadata values for a field, ordered by count. Supports the same filter DSL as queries and an optional `namespace`:
+
+```json
+{ "field": "category", "filter": { "in_stock": { "$eq": "true" } }, "limit": 20 }
+```
+
+Records missing the field are excluded. Maximum `limit` is 100 (default 20).
 
 ### Collection Aliases
 
