@@ -672,8 +672,7 @@ pub async fn facets(
     let table = collection.table_ref();
     let limit = req.limit;
 
-    let field_accessor =
-        crate::planner::filter_translator::jsonb_field_accessor(&req.field);
+    let field_accessor = crate::planner::filter_translator::jsonb_field_accessor(&req.field);
 
     let (filter_sql, filter_params) = if let Some(f) = &req.filter {
         crate::planner::filter_translator::translate_filter(f, 1)

@@ -31,7 +31,10 @@ async fn facets_basic_counts() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/collections/{collection}/facets", server.base_url))
+        .post(format!(
+            "{}/collections/{collection}/facets",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({"field": "category"}))
         .send()
@@ -79,7 +82,10 @@ async fn facets_with_filter() {
 
     // Facet on category, but only for in_stock=true records
     let resp = client
-        .post(format!("{}/collections/{collection}/facets", server.base_url))
+        .post(format!(
+            "{}/collections/{collection}/facets",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "field": "category",
@@ -125,7 +131,10 @@ async fn facets_excludes_records_missing_field() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/collections/{collection}/facets", server.base_url))
+        .post(format!(
+            "{}/collections/{collection}/facets",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({"field": "category"}))
         .send()
@@ -173,7 +182,10 @@ async fn facets_respects_limit() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/collections/{collection}/facets", server.base_url))
+        .post(format!(
+            "{}/collections/{collection}/facets",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({"field": "category", "limit": 3}))
         .send()
@@ -194,7 +206,10 @@ async fn facets_empty_collection_returns_empty() {
     let client = Client::new();
 
     let resp = client
-        .post(format!("{}/collections/{collection}/facets", server.base_url))
+        .post(format!(
+            "{}/collections/{collection}/facets",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({"field": "category"}))
         .send()
@@ -216,17 +231,16 @@ async fn facets_invalid_field_name_returns_400() {
 
     for bad_field in &["bad field", "'; DROP TABLE--", "123starts_with_digit", ""] {
         let resp = client
-            .post(format!("{}/collections/{collection}/facets", server.base_url))
+            .post(format!(
+                "{}/collections/{collection}/facets",
+                server.base_url
+            ))
             .header("Api-Key", &server.api_key)
             .json(&json!({"field": bad_field}))
             .send()
             .await
             .unwrap();
-        assert_eq!(
-            resp.status(),
-            400,
-            "Expected 400 for field={bad_field:?}"
-        );
+        assert_eq!(resp.status(), 400, "Expected 400 for field={bad_field:?}");
     }
 
     common::cleanup_index(&server, &collection).await;
@@ -239,7 +253,10 @@ async fn facets_limit_out_of_range_returns_400() {
     let client = Client::new();
 
     let resp = client
-        .post(format!("{}/collections/{collection}/facets", server.base_url))
+        .post(format!(
+            "{}/collections/{collection}/facets",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .json(&json!({"field": "category", "limit": 101}))
         .send()
