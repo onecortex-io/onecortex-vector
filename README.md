@@ -1,6 +1,6 @@
 # Onecortex Vector
 
-High performance (⚡) vector database built in Rust (🦀) on PostgreSQL. Simple API with dense vector and hybrid search (🔎), plus rich metadata filtering, namespace support, and advanced retrieval features.
+High performance (⚡) and scalable vector database built in Rust (🦀) on PostgreSQL. Simple API with dense vector and hybrid search (🔎), plus rich metadata filtering, namespace support, and advanced retrieval features.
 
 ---
 
@@ -27,7 +27,7 @@ Building AI applications with RAG pipelines, semantic search, and recommendation
 - **Dense ANN search:** cosine, euclidean, and dot product similarity via StreamingDiskANN
 - **Hybrid search:** combine dense vector similarity with BM25 text search using Reciprocal Rank Fusion (RRF)
 - **Reranking:** plug in Cohere, Voyage, Jina, Pinecone Inference, or a self-hosted cross-encoder to rerank results with natural language queries
-- **Metadata filtering:** rich query DSL with `$eq`, `$ne`, `$gt`, `$lt`, `$in`, `$nin`, `$and`, `$or` operators
+- **Metadata filtering:** rich query DSL with `$eq`, `$ne`, `$gt`, `$lt`, `$in`, `$nin`, `$and`, `$or` operators, plus geo radius/bbox (`$geoRadius`, `$geoBBox`), native datetime comparisons, and array element matching (`$elemMatch`)
 - **Namespaces:** isolate data within a collection using scoped operations by namespace
 - **Batch queries:** fan out up to 10 queries in a single request with concurrent execution
 - **Scroll & sample:** paginate over all records or draw a random sample, both with full filter support
@@ -274,6 +274,32 @@ Get aggregated counts of distinct metadata values for a field, ordered by count.
 ```
 
 Records missing the field are excluded. Maximum `limit` is 100 (default 20).
+
+### Advanced Metadata Filtering
+
+**Datetime ranges** — use ISO 8601 strings with `$gt`/`$gte`/`$lt`/`$lte`; no epoch-integer conversion needed:
+
+```json
+{ "filter": { "created_at": { "$gte": "2025-01-01T00:00:00Z" } } }
+```
+
+**Geo radius** — filter records within a distance from a lat/lon point (requires a `location` field with `lat`/`lon` sub-keys):
+
+```json
+{ "filter": { "location": { "$geoRadius": { "lat": 40.7, "lon": -74.0, "radiusMeters": 5000 } } } }
+```
+
+**Geo bounding box:**
+
+```json
+{ "filter": { "location": { "$geoBBox": { "minLat": 40.0, "maxLat": 41.5, "minLon": -75.0, "maxLon": -73.0 } } } }
+```
+
+**Array element matching** — filter records where a metadata array contains at least one element matching a condition:
+
+```json
+{ "filter": { "tags": { "$elemMatch": { "type": "premium" } } } }
+```
 
 ### Collection Aliases
 

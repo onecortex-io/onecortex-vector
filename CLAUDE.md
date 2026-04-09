@@ -24,10 +24,10 @@ cargo clippy -- -D warnings
 | Catalog schema | `_onecortex_vector` — system metadata only (collections, collection_stats, api_keys, aliases) |
 | User data schema | `_onecortex` — shared namespace for user-facing data across Onecortex services |
 | Collection tables | `_onecortex.col_<uuid>` (one table per collection) |
-| Column name for embeddings | `values` (not `embedding`) — matches Pinecone API field name |
+| Column name for embeddings | `values` (not `embedding`) |
 | DiskANN `num_neighbors` | 50 (not 64) |
 | RLS pattern | `set_config('app.current_namespace', $1, true)` inside `pool.begin()` — NEVER bare `SET` |
-| Euclidean score | `1/(1+dist)` — known Pinecone deviation |
+| Euclidean score | `1/(1+dist)` |
 | SPARSEVEC | Not stored; `sparseValues` in upsert requests is silently dropped + WARN logged |
 | BM25 score | `<@>` returns negative; always negate before ranking |
 

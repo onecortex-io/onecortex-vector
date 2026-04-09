@@ -64,10 +64,34 @@ pub fn translate_filter(
                     let clause = match op.as_str() {
                         "$eq" => format!("{sql_field} = ${n}"),
                         "$ne" => format!("{sql_field} != ${n}"),
-                        "$gt" => format!("({sql_field})::numeric > ${n}"),
-                        "$gte" => format!("({sql_field})::numeric >= ${n}"),
-                        "$lt" => format!("({sql_field})::numeric < ${n}"),
-                        "$lte" => format!("({sql_field})::numeric <= ${n}"),
+                        "$gt" => {
+                            if op_val.is_string() {
+                                format!("({sql_field})::timestamptz > ${n}::timestamptz")
+                            } else {
+                                format!("({sql_field})::numeric > ${n}")
+                            }
+                        }
+                        "$gte" => {
+                            if op_val.is_string() {
+                                format!("({sql_field})::timestamptz >= ${n}::timestamptz")
+                            } else {
+                                format!("({sql_field})::numeric >= ${n}")
+                            }
+                        }
+                        "$lt" => {
+                            if op_val.is_string() {
+                                format!("({sql_field})::timestamptz < ${n}::timestamptz")
+                            } else {
+                                format!("({sql_field})::numeric < ${n}")
+                            }
+                        }
+                        "$lte" => {
+                            if op_val.is_string() {
+                                format!("({sql_field})::timestamptz <= ${n}::timestamptz")
+                            } else {
+                                format!("({sql_field})::numeric <= ${n}")
+                            }
+                        }
                         "$in" => {
                             let arr = op_val.as_array().ok_or_else(|| {
                                 FilterError::Malformed("$in requires an array".to_string())
@@ -99,13 +123,97 @@ pub fn translate_filter(
                                 sql_arr.join(",")
                             )
                         }
+                        "$geoRadius" => {
+                            let obj = op_val.as_object().ok_or_else(|| {
+                                FilterError::Malformed(
+                                    "$geoRadius requires {lat, lon, radiusMeters}".to_string(),
+                                )
+                            })?;
+                            let lat = obj.get("lat").and_then(|v| v.as_f64()).ok_or_else(|| {
+                                FilterError::Malformed(
+                                    "$geoRadius.lat must be a number".to_string(),
+                                )
+                            })?;
+                            let lon = obj.get("lon").and_then(|v| v.as_f64()).ok_or_else(|| {
+                                FilterError::Malformed(
+                                    "$geoRadius.lon must be a number".to_string(),
+                                )
+                            })?;
+                            let radius = obj
+                                .get("radiusMeters")
+                                .and_then(|v| v.as_f64())
+                                .ok_or_else(|| {
+                                    FilterError::Malformed(
+                                        "$geoRadius.radiusMeters must be a number".to_string(),
+                                    )
+                                })?;
+                            let obj_path = jsonb_object_path(field);
+                            format!(
+                                "earth_distance(\
+                                    ll_to_earth(({obj_path}->>'lat')::float8, ({obj_path}->>'lon')::float8),\
+                                    ll_to_earth({lat}, {lon})\
+                                ) <= {radius}"
+                            )
+                        }
+                        "$geoBBox" => {
+                            let obj = op_val.as_object().ok_or_else(|| {
+                                FilterError::Malformed(
+                                    "$geoBBox requires {minLat, maxLat, minLon, maxLon}"
+                                        .to_string(),
+                                )
+                            })?;
+                            let min_lat =
+                                obj.get("minLat").and_then(|v| v.as_f64()).ok_or_else(|| {
+                                    FilterError::Malformed(
+                                        "$geoBBox.minLat must be a number".to_string(),
+                                    )
+                                })?;
+                            let max_lat =
+                                obj.get("maxLat").and_then(|v| v.as_f64()).ok_or_else(|| {
+                                    FilterError::Malformed(
+                                        "$geoBBox.maxLat must be a number".to_string(),
+                                    )
+                                })?;
+                            let min_lon =
+                                obj.get("minLon").and_then(|v| v.as_f64()).ok_or_else(|| {
+                                    FilterError::Malformed(
+                                        "$geoBBox.minLon must be a number".to_string(),
+                                    )
+                                })?;
+                            let max_lon =
+                                obj.get("maxLon").and_then(|v| v.as_f64()).ok_or_else(|| {
+                                    FilterError::Malformed(
+                                        "$geoBBox.maxLon must be a number".to_string(),
+                                    )
+                                })?;
+                            let obj_path = jsonb_object_path(field);
+                            format!(
+                                "(({obj_path}->>'lat')::float8 BETWEEN {min_lat} AND {max_lat} \
+                                  AND ({obj_path}->>'lon')::float8 BETWEEN {min_lon} AND {max_lon})"
+                            )
+                        }
+                        "$elemMatch" => {
+                            if !op_val.is_object() {
+                                return Err(FilterError::Malformed(
+                                    "$elemMatch value must be a JSON object".to_string(),
+                                ));
+                            }
+                            let match_json = serde_json::to_string(op_val).map_err(|e| {
+                                FilterError::Malformed(format!(
+                                    "$elemMatch serialization error: {e}"
+                                ))
+                            })?;
+                            let escaped = match_json.replace('\'', "''");
+                            let obj_path = jsonb_object_path(field);
+                            format!("{obj_path} @> '[{escaped}]'::jsonb")
+                        }
                         other => return Err(FilterError::UnsupportedOperator(other.to_string())),
                     };
 
                     // $in and $nin embed values directly (safe because we quote them above)
                     // All other operators use parameterized binds
                     match op.as_str() {
-                        "$in" | "$nin" => {} // values inlined in SQL above
+                        "$in" | "$nin" | "$geoRadius" | "$geoBBox" | "$elemMatch" => {} // values inlined in SQL above
                         _ => {
                             params.push(op_val.clone());
                         }
@@ -134,6 +242,20 @@ pub(crate) fn jsonb_field_accessor(field: &str) -> String {
         } else {
             acc.push_str(&format!("->'{}'", part));
         }
+    }
+    acc
+}
+
+/// Convert a field name to a JSONB object-accessor expression (uses -> throughout).
+/// Unlike jsonb_field_accessor, the result is a JSONB value, not text.
+/// Used when sub-field access or array containment is needed on the result.
+///
+/// "location"  -> "metadata->'location'"
+/// "place.geo" -> "metadata->'place'->'geo'"
+pub(crate) fn jsonb_object_path(field: &str) -> String {
+    let mut acc = "metadata".to_string();
+    for part in field.split('.') {
+        acc.push_str(&format!("->'{part}'"));
     }
     acc
 }
@@ -188,5 +310,156 @@ mod tests {
     fn unknown_operator_errors() {
         let result = translate_filter(&json!({"x": {"$regex": "foo"}}), 0);
         assert!(result.is_err());
+    }
+
+    // --- Datetime ---
+
+    #[test]
+    fn gte_string_uses_timestamptz() {
+        let (sql, params) =
+            translate_filter(&json!({"created_at": {"$gte": "2025-01-01T00:00:00Z"}}), 0).unwrap();
+        assert!(
+            sql.contains("::timestamptz >= $1::timestamptz"),
+            "got: {sql}"
+        );
+        assert_eq!(params[0], json!("2025-01-01T00:00:00Z"));
+    }
+
+    #[test]
+    fn gt_number_still_uses_numeric() {
+        let (sql, _) = translate_filter(&json!({"score": {"$gt": 42}}), 0).unwrap();
+        assert!(sql.contains("::numeric > $1"), "got: {sql}");
+    }
+
+    #[test]
+    fn lte_string_uses_timestamptz() {
+        let (sql, params) =
+            translate_filter(&json!({"updated_at": {"$lte": "2025-12-31T23:59:59Z"}}), 0).unwrap();
+        assert!(
+            sql.contains("::timestamptz <= $1::timestamptz"),
+            "got: {sql}"
+        );
+        assert_eq!(params.len(), 1);
+    }
+
+    // --- Geo ---
+
+    #[test]
+    fn geo_radius_sql() {
+        let (sql, params) = translate_filter(
+            &json!({"location": {"$geoRadius": {"lat": 40.7, "lon": -74.0, "radiusMeters": 5000.0}}}),
+            0,
+        )
+        .unwrap();
+        assert!(
+            sql.contains("earth_distance") && sql.contains("ll_to_earth"),
+            "got: {sql}"
+        );
+        assert!(sql.contains("<= 5000"), "got: {sql}");
+        assert!(params.is_empty());
+    }
+
+    #[test]
+    fn geo_radius_nested_field() {
+        let (sql, _) = translate_filter(
+            &json!({"place.coords": {"$geoRadius": {"lat": 1.0, "lon": 2.0, "radiusMeters": 100.0}}}),
+            0,
+        )
+        .unwrap();
+        assert!(sql.contains("metadata->'place'->'coords'"), "got: {sql}");
+    }
+
+    #[test]
+    fn geo_bbox_sql() {
+        let (sql, params) = translate_filter(
+            &json!({"location": {"$geoBBox": {"minLat": 40.0, "maxLat": 41.0, "minLon": -75.0, "maxLon": -73.0}}}),
+            0,
+        )
+        .unwrap();
+        assert!(
+            sql.contains("BETWEEN 40") && sql.contains("BETWEEN -75"),
+            "got: {sql}"
+        );
+        assert!(params.is_empty());
+    }
+
+    #[test]
+    fn geo_radius_missing_field_errors() {
+        // missing radiusMeters
+        let r = translate_filter(
+            &json!({"location": {"$geoRadius": {"lat": 40.7, "lon": -74.0}}}),
+            0,
+        );
+        assert!(matches!(r, Err(FilterError::Malformed(_))));
+    }
+
+    #[test]
+    fn geo_radius_non_object_errors() {
+        let r = translate_filter(&json!({"location": {"$geoRadius": "not-an-object"}}), 0);
+        assert!(matches!(r, Err(FilterError::Malformed(_))));
+    }
+
+    // --- $elemMatch ---
+
+    #[test]
+    fn elem_match_basic() {
+        let (sql, params) =
+            translate_filter(&json!({"tags": {"$elemMatch": {"type": "premium"}}}), 0).unwrap();
+        assert!(sql.contains("@>") && sql.contains("::jsonb"), "got: {sql}");
+        assert!(sql.contains("metadata->'tags'"), "got: {sql}");
+        assert!(params.is_empty());
+    }
+
+    #[test]
+    fn elem_match_non_object_errors() {
+        let r = translate_filter(&json!({"tags": {"$elemMatch": "not-an-object"}}), 0);
+        assert!(matches!(r, Err(FilterError::Malformed(_))));
+    }
+
+    #[test]
+    fn elem_match_single_quote_escaped() {
+        let (sql, _) =
+            translate_filter(&json!({"tags": {"$elemMatch": {"name": "O'Brien"}}}), 0).unwrap();
+        assert!(
+            sql.contains("O''Brien"),
+            "single quote must be escaped, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn elem_match_nested_field() {
+        let (sql, _) = translate_filter(
+            &json!({"user.roles": {"$elemMatch": {"level": "admin"}}}),
+            0,
+        )
+        .unwrap();
+        assert!(sql.contains("metadata->'user'->'roles'"), "got: {sql}");
+    }
+
+    #[test]
+    fn elem_match_does_not_perturb_param_offset() {
+        let (sql, params) = translate_filter(
+            &json!({"$and": [
+                {"tags": {"$elemMatch": {"type": "premium"}}},
+                {"score": {"$gte": 5}}
+            ]}),
+            2,
+        )
+        .unwrap();
+        // $gte 5 is numeric, so uses ::numeric; param is at offset 2+0+1 = $3
+        assert!(sql.contains("$3"), "score param should be $3, got: {sql}");
+        assert_eq!(params.len(), 1);
+    }
+
+    // --- jsonb_object_path helper ---
+
+    #[test]
+    fn jsonb_object_path_single() {
+        assert_eq!(jsonb_object_path("location"), "metadata->'location'");
+    }
+
+    #[test]
+    fn jsonb_object_path_nested() {
+        assert_eq!(jsonb_object_path("place.geo"), "metadata->'place'->'geo'");
     }
 }

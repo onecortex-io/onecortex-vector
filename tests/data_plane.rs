@@ -752,3 +752,264 @@ async fn sample_with_filter() {
 
     common::cleanup_index(&server, &name).await;
 }
+
+// --- Advanced metadata filter integration tests ---
+
+#[tokio::test]
+async fn filter_gte_datetime() {
+    let server = common::start_test_server().await;
+    let name = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    client
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({
+            "records": [
+                {"id": "r1", "values": [1.0, 0.0, 0.0], "metadata": {"created_at": "2025-01-15T00:00:00Z"}},
+                {"id": "r2", "values": [0.0, 1.0, 0.0], "metadata": {"created_at": "2025-07-01T00:00:00Z"}},
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    let resp = client
+        .post(format!(
+            "{}/collections/{name}/records/fetch_by_metadata",
+            server.base_url
+        ))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({"filter": {"created_at": {"$gte": "2025-06-01T00:00:00Z"}}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let records = body["records"].as_array().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["id"], "r2");
+
+    common::cleanup_index(&server, &name).await;
+}
+
+#[tokio::test]
+async fn filter_lt_datetime() {
+    let server = common::start_test_server().await;
+    let name = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    client
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({
+            "records": [
+                {"id": "r1", "values": [1.0, 0.0, 0.0], "metadata": {"created_at": "2025-01-15T00:00:00Z"}},
+                {"id": "r2", "values": [0.0, 1.0, 0.0], "metadata": {"created_at": "2025-07-01T00:00:00Z"}},
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    let resp = client
+        .post(format!(
+            "{}/collections/{name}/records/fetch_by_metadata",
+            server.base_url
+        ))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({"filter": {"created_at": {"$lt": "2025-06-01T00:00:00Z"}}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let records = body["records"].as_array().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["id"], "r1");
+
+    common::cleanup_index(&server, &name).await;
+}
+
+#[tokio::test]
+async fn filter_geo_radius() {
+    let server = common::start_test_server().await;
+    let name = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    // New York City and Los Angeles
+    client
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({
+            "records": [
+                {"id": "nyc", "values": [1.0, 0.0, 0.0], "metadata": {"location": {"lat": 40.7128, "lon": -74.0060}}},
+                {"id": "la",  "values": [0.0, 1.0, 0.0], "metadata": {"location": {"lat": 34.0522, "lon": -118.2437}}},
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // 1 km radius around NYC — should only match nyc
+    let resp = client
+        .post(format!(
+            "{}/collections/{name}/records/fetch_by_metadata",
+            server.base_url
+        ))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({
+            "filter": {
+                "location": {"$geoRadius": {"lat": 40.7128, "lon": -74.0060, "radiusMeters": 1000.0}}
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let records = body["records"].as_array().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["id"], "nyc");
+
+    common::cleanup_index(&server, &name).await;
+}
+
+#[tokio::test]
+async fn filter_geo_bbox() {
+    let server = common::start_test_server().await;
+    let name = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    client
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({
+            "records": [
+                {"id": "nyc", "values": [1.0, 0.0, 0.0], "metadata": {"location": {"lat": 40.7128, "lon": -74.0060}}},
+                {"id": "la",  "values": [0.0, 1.0, 0.0], "metadata": {"location": {"lat": 34.0522, "lon": -118.2437}}},
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // Bounding box covering the NYC metro area only
+    let resp = client
+        .post(format!(
+            "{}/collections/{name}/records/fetch_by_metadata",
+            server.base_url
+        ))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({
+            "filter": {
+                "location": {"$geoBBox": {
+                    "minLat": 40.0, "maxLat": 41.5,
+                    "minLon": -75.0, "maxLon": -73.0
+                }}
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let records = body["records"].as_array().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["id"], "nyc");
+
+    common::cleanup_index(&server, &name).await;
+}
+
+#[tokio::test]
+async fn filter_elem_match_hit() {
+    let server = common::start_test_server().await;
+    let name = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    client
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({
+            "records": [
+                {"id": "r1", "values": [1.0, 0.0, 0.0], "metadata": {"tags": [{"type": "premium"}, {"type": "basic"}]}},
+                {"id": "r2", "values": [0.0, 1.0, 0.0], "metadata": {"tags": [{"type": "basic"}]}},
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    let resp = client
+        .post(format!(
+            "{}/collections/{name}/records/fetch_by_metadata",
+            server.base_url
+        ))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({"filter": {"tags": {"$elemMatch": {"type": "premium"}}}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let records = body["records"].as_array().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["id"], "r1");
+
+    common::cleanup_index(&server, &name).await;
+}
+
+#[tokio::test]
+async fn filter_elem_match_no_results() {
+    let server = common::start_test_server().await;
+    let name = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    client
+        .post(format!(
+            "{}/collections/{name}/records/upsert",
+            server.base_url
+        ))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({
+            "records": [
+                {"id": "r1", "values": [1.0, 0.0, 0.0], "metadata": {"tags": [{"type": "premium"}]}},
+                {"id": "r2", "values": [0.0, 1.0, 0.0], "metadata": {"tags": [{"type": "basic"}]}},
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    let resp = client
+        .post(format!(
+            "{}/collections/{name}/records/fetch_by_metadata",
+            server.base_url
+        ))
+        .header("Api-Key", &server.api_key)
+        .json(&json!({"filter": {"tags": {"$elemMatch": {"type": "enterprise"}}}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let records = body["records"].as_array().unwrap();
+    assert_eq!(records.len(), 0);
+
+    common::cleanup_index(&server, &name).await;
+}
