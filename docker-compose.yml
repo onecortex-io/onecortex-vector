@@ -30,8 +30,6 @@ services:
       start_period: 10s
 
   # ── Onecortex Vector API ──────────────────────────────────────────────────────
-  # NOTE: A root-level Dockerfile for the API service does not exist yet.
-  # Add one before running `docker compose up` for the first time.
   onecortex-vector:
     build:
       context: .

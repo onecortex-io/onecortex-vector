@@ -1,0 +1,17 @@
+# Build artifacts
+target/
+
+# Git
+.git/
+.gitignore
+
+# Environment files — never bake secrets into the image
+.env
+.env.local
+.env.*.local
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
