@@ -45,7 +45,7 @@ Building AI applications with RAG pipelines, semantic search, and recommendation
 ### 1. Start PostgreSQL
 
 ```bash
-docker compose -f deploy/docker-compose.yml up -d postgres
+docker compose up -d postgres
 ```
 
 This starts PostgreSQL 18 with pgvector, pgvectorscale, and pg_textsearch pre-installed.
@@ -222,7 +222,7 @@ Supported reranking backends (All Optional and configured via `ONECORTEX_VECTOR_
 To start the optional self-hosted cross-encoder:
 
 ```bash
-docker compose -f deploy/docker-compose.yml --profile reranking up -d
+docker compose --profile reranking up -d
 ```
 
 ## Advanced Query Features
@@ -368,7 +368,7 @@ Two PostgreSQL schemas are used: `_onecortex_vector` holds the system catalog (c
 cargo build
 
 # Run tests (requires PostgreSQL)
-docker compose -f deploy/docker-compose.yml up -d postgres
+docker compose up -d postgres
 cargo test
 
 # Lint

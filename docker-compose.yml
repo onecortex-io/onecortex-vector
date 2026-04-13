@@ -1,0 +1,83 @@
+services:
+  # ── PostgreSQL ───────────────────────────────────────────────────────────────
+  # Onecortex-managed Postgres 18 image with pgvector, pgvectorscale, and pg_textsearch.
+  # Source and build instructions: ../onecortex-postgres
+  postgres:
+    image: ghcr.io/onecortex-io/onecortex-postgres:latest
+    platform: linux/amd64
+    environment:
+      POSTGRES_DB: onecortex_vector
+      POSTGRES_USER: onecortex_vector
+      POSTGRES_PASSWORD: onecortex_vector
+    ports:
+      - "5432:5432"
+    # pg_textsearch MUST be in shared_preload_libraries before CREATE EXTENSION is called.
+    # Set it here from day one so Phase 3 migrations work without any Docker config change.
+    command: >
+      postgres
+        -c shared_preload_libraries=pg_textsearch
+        -c max_connections=200
+        -c work_mem=64MB
+        -c maintenance_work_mem=256MB
+    volumes:
+      - pgdata:/var/lib/postgresql
+      # init-extensions.sql is baked into the image — no volume mount needed.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U onecortex_vector -d onecortex_vector"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ── Onecortex Vector API ──────────────────────────────────────────────────────
+  # NOTE: A root-level Dockerfile for the API service does not exist yet.
+  # Add one before running `docker compose up` for the first time.
+  onecortex-vector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: onecortex-vector:latest
+    environment:
+      ONECORTEX_VECTOR_DATABASE_URL: postgres://onecortex_vector:onecortex_vector@postgres:5432/onecortex_vector
+      ONECORTEX_VECTOR_API_PORT: "8080"
+      ONECORTEX_VECTOR_ADMIN_PORT: "9090"
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── Cross-Encoder (optional reranking) ───────────────────────────────────────
+  # Uncomment to enable local reranking via HuggingFace Text Embeddings Inference.
+  # Also set ONECORTEX_VECTOR_RERANK_BACKEND=cross-encoder in the api service above.
+  #
+  # Default model: BAAI/bge-reranker-v2-m3
+  #   - Multilingual (100+ languages)
+  #   - 8,192 token context window (handles long documents without truncation)
+  #   - Strong recall on English + multilingual benchmarks
+  #   - ~280MB model size
+  #
+  # API:
+  #   POST /rerank  { "query": "...", "texts": ["...", "..."], "truncate": true }
+  #   Response:     [{ "index": 0, "score": 0.98 }, ...]
+  #
+  # cross-encoder:
+  #   image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.5
+  #   command: --model-id BAAI/bge-reranker-v2-m3 --port 8080
+  #   ports:
+  #     - "8091:8080"
+  #   environment:
+  #     - HF_HUB_CACHE=/data
+  #   volumes:
+  #     - cross_encoder_cache:/data
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 5
+  #     start_period: 120s   # Model download (~280MB) takes time on first start.
+
+volumes:
+  pgdata:
+  # cross_encoder_cache:   # Uncomment when cross-encoder is enabled above.
