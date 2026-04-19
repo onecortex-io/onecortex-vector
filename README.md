@@ -1,42 +1,51 @@
 # Onecortex Vector
 
-High performance (⚡) and scalable vector database built in Rust (🦀) on PostgreSQL. Simple API with dense vector and hybrid search (🔎), plus rich metadata filtering, namespace support, and advanced retrieval features.
+High-performance hybrid vector database built in Rust 🦀. Simple API with hybrid search (Combining Dense vector, Full-text, Geo radius) including rich metadata filtering, namespace support, and advanced retrieval/search features.
 
 ---
 
 ## The Problem
 
-Building AI applications with RAG pipelines, semantic search, and recommendation engines is deceptively simple in a demo but surprisingly difficult in production. Developers typically hit five major roadblocks mentioned below:
+Building AI applications with Retreival Augmented Generation (RAG) pipelines, Semantic search or Recommendation engines is quite simple in a demo but it is surprisingly difficult in production at scale.
 
-- **Precision Failures:** Pure vector search excels at semantic meaning but fails at exact details. It struggles to distinguish between similar identifiers (e.g., `invoice #123456` vs. `invoice #123457`) and misses rare technical terms. This leads to LLM hallucinations in RAG setups.
-- **Architectural Complexity:** High quality retrieval requires "Hybrid Search," which usually means bolting together separate vector and full-text search systems. Managing this merge logic and re-ranking layers transforms a simple query into a complex distributed pipeline.
+Developers typically hit five major roadblocks at this stage:
+
+- **Search Precision Failures:** Pure vector search is great at semantic meaning but it fails at exact details match. For instace, it struggles to distinguish between similar identifiers (like `invoice #123456` vs. `invoice #123457`) and misses rare technical terms. This leads to LLM hallucinations and inaccurate outputs in RAG setups.
+
+- **Architectural Complexity:** High quality retrieval needs "Hybrid Search," which usually means bolting together separate vector and full-text search systems. Managing this merge logic and re-ranking layers transforms a simple query into a complex distributed pipeline in AI application backends.
+
 - **Fragmented Infrastructure:**
-    * **Managed Services:** Like Pinecone and Qdrant leads to high costs and proprietary vendor lock-in.
-    * **Self-Hosted Engines:** Like Milvus and Weaviate require orchestrating heavy, stateful components like etcd and message queues. Qdrant is open source but event that forces you to manage complex infrastructure stack outside your primary database.
-- **Unpredictable Scaling:** Combining metadata filters with vector search is a major bottleneck. Most systems suffer from unpredictable latency and degraded recall as datasets grow from thousands to millions of records.
-- **Consistency & Maintenance:** Most vector databases struggle with continuous updates and data shifts. Upgrading embedding models or handling real-time inserts often leads to silent precision drops with no easy way to roll back.
+    * **Managed Services:** Managed services like Pinecone and Qdrant leads to high costs and proprietary vendor lock-in. Plus another third-party data store which can raise compliance, data privacy, and GDPR concerns.
+    * **Self-Hosted Engines:** Like Milvus and Weaviate require orchestrating heavy, stateful components like etcd and message queues. Qdrant is open source but it forces you to manage complex stack outside your primary database infrastructure.
 
-**The result** is that Engineering teams spend more time managing retrieval infrastructure than building their actual product.
+- **Unpredictable Scaling:** Combining scalar / metadata filters with hybrid vector search is a major bottleneck. Most systems suffer from unpredictable latency and degraded recall as datasets grow from thousands to millions of documents.
 
-**Onecortex Vector** is built to change that: a self-hosted vector database built on **PostgreSQL** that handles the full retrieval stack - dense vector search, hybrid BM25 fusion, re-ranking, and rich filtering without the overhead of a distributed system to run at scale.
+- **Consistency & Maintenance:** Most vector databases struggle with continuous updates and data shifts. Upgrading embedding models or handling real-time inserts often leads to silent precision drops with no easy way to roll back in Production.
+
+**The result** of all this is that AI Engineering teams spend more time managing retrieval infrastructure than building actual products.
+
+**Onecortex Vector** is built to change that: a self-hosted hybrid vector database built on familiar **PostgreSQL** to handle the full retrieval stack - dense vector search, hybrid BM25 fusion, geo radius search, re-ranking, and rich filtering without the overhead of a distributed system to run at scale.
 
 ---
 
 ## Features
 
-- **Dense ANN search:** cosine, euclidean, and dot product similarity via StreamingDiskANN
-- **Hybrid search:** combine dense vector similarity with BM25 text search using Reciprocal Rank Fusion (RRF)
-- **Reranking:** plug in Cohere, Voyage, Jina, Pinecone Inference, or a self-hosted cross-encoder to rerank results with natural language queries
-- **Metadata filtering:** rich query DSL with `$eq`, `$ne`, `$gt`, `$lt`, `$in`, `$nin`, `$and`, `$or` operators, plus geo radius/bbox (`$geoRadius`, `$geoBBox`), native datetime comparisons, and array element matching (`$elemMatch`)
-- **Namespaces:** isolate data within a collection using scoped operations by namespace
-- **Batch queries:** fan out up to 10 queries in a single request with concurrent execution
-- **Scroll & sample:** paginate over all records or draw a random sample, both with full filter support
-- **Score threshold:** filter results by minimum similarity score, applied after reranking
-- **GroupBy:** group nearest-neighbor results by any metadata field to avoid same-source clustering
-- **Faceted counts:** aggregate counts of distinct metadata values for any field, optionally scoped to a filter — powers category sidebars and filter UIs in a single request
-- **Recommendations:** find similar items from positive/negative example IDs without supplying a query vector
-- **Collection aliases:** point a named alias at any collection for zero-downtime swaps and A/B testing
-- **Self-hosted:** runs on your own PostgreSQL instance, no vendor lock-in
+- **Dense ANN search:** *cosine, euclidean, and dot product similarity search using StreamingDiskANN within pgvectorscale.*
+- **Hybrid search:** *combine dense vector search with BM25 text search and geo radius search using Reciprocal Rank Fusion (RRF)*
+- **Re-ranking:** *using Cohere, Voyage, Jina, Pinecone Inference, or a self-hosted cross-encoder to rerank results*
+- **Metadata filtering:** *rich query DSL with `$eq`, `$ne`, `$gt`, `$lt`, `$in`, `$nin`, `$and`, `$or` operators*
+- **Geo filtering:** *filter records by geographic proximity (`$geoRadius`) or bounding box (`$geoBBox`) using coordinates stored in metadata*
+- **Datetime filtering:** *native ISO 8601 datetime comparisons using the standard `$gt`, `$gte`, `$lt`, `$lte` operators*
+- **Array element matching:** *`$elemMatch` filters records where at least one element in a metadata array field matches a sub-filter object*
+- **Namespaces:** *isolate data within a collection using scoped operations by namespace*
+- **Batch queries:** *fan out up to 10 queries in a single request with concurrent execution*
+- **Scroll & sample:** *paginate over all records or draw a random sample, both with full filter support*
+- **Score threshold:** *filter results by minimum similarity score - applied after reranking results*
+- **Group by:** *group nearest-neighbor results by any metadata field to avoid same-source clustering*
+- **Faceted counts:** *aggregate counts of distinct metadata values for any field, optionally scoped to a filter*
+- **Recommendations API:** *find similar items from positive/negative example IDs without supplying a query vector*
+- **Collection aliases:** *point a named alias at any collection for zero-downtime swaps and A/B testing before releases*
+- **Self-hosted:** *uses PostgreSQL database as its backend, no vendor lock-in*
 
 ---
 
