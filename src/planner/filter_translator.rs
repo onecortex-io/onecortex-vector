@@ -68,28 +68,28 @@ pub fn translate_filter(
                             if op_val.is_string() {
                                 format!("({sql_field})::timestamptz > ${n}::timestamptz")
                             } else {
-                                format!("({sql_field})::numeric > ${n}")
+                                format!("({sql_field})::numeric > ${n}::numeric")
                             }
                         }
                         "$gte" => {
                             if op_val.is_string() {
                                 format!("({sql_field})::timestamptz >= ${n}::timestamptz")
                             } else {
-                                format!("({sql_field})::numeric >= ${n}")
+                                format!("({sql_field})::numeric >= ${n}::numeric")
                             }
                         }
                         "$lt" => {
                             if op_val.is_string() {
                                 format!("({sql_field})::timestamptz < ${n}::timestamptz")
                             } else {
-                                format!("({sql_field})::numeric < ${n}")
+                                format!("({sql_field})::numeric < ${n}::numeric")
                             }
                         }
                         "$lte" => {
                             if op_val.is_string() {
                                 format!("({sql_field})::timestamptz <= ${n}::timestamptz")
                             } else {
-                                format!("({sql_field})::numeric <= ${n}")
+                                format!("({sql_field})::numeric <= ${n}::numeric")
                             }
                         }
                         "$in" => {

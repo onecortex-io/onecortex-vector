@@ -170,7 +170,10 @@ pub async fn hybrid_query(
 
     // Bind filter params at $6+
     for param in &filter_params {
-        q = q.bind(param.as_str().unwrap_or(""));
+        q = match param {
+            serde_json::Value::String(s) => q.bind(s.as_str()),
+            _ => q.bind(param.to_string()),
+        };
     }
 
     let rows = q.fetch_all(pool).await?;

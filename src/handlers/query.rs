@@ -234,7 +234,10 @@ pub async fn query_vectors(
         .bind(&namespace)
         .bind(fetch_k);
     for p in &filter_params {
-        query = query.bind(p.as_str().unwrap_or(""));
+        query = match p {
+            serde_json::Value::String(s) => query.bind(s.as_str()),
+            _ => query.bind(p.to_string()),
+        };
     }
 
     let rows = query.fetch_all(&state.pool).await?;
@@ -574,7 +577,10 @@ async fn execute_ann_query(
 
     let mut query = sqlx::query(&sql).bind(&vec_str).bind(namespace).bind(top_k);
     for p in &filter_params {
-        query = query.bind(p.as_str().unwrap_or(""));
+        query = match p {
+            serde_json::Value::String(s) => query.bind(s.as_str()),
+            _ => query.bind(p.to_string()),
+        };
     }
 
     let rows = query.fetch_all(pool).await?;
@@ -696,7 +702,10 @@ pub async fn facets(
 
     let mut query = sqlx::query(&sql).bind(&namespace);
     for p in &filter_params {
-        query = query.bind(p.as_str().unwrap_or(""));
+        query = match p {
+            serde_json::Value::String(s) => query.bind(s.as_str()),
+            _ => query.bind(p.to_string()),
+        };
     }
 
     let rows = query.fetch_all(&state.pool).await?;

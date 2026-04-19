@@ -293,7 +293,10 @@ pub async fn fetch_by_metadata(
 
     let mut query = sqlx::query(&sql).bind(&namespace);
     for p in &filter_params {
-        query = query.bind(p.as_str().unwrap_or(""));
+        query = match p {
+            serde_json::Value::String(s) => query.bind(s.as_str()),
+            _ => query.bind(p.to_string()),
+        };
     }
 
     let rows = query.fetch_all(&state.pool).await?;
@@ -361,7 +364,10 @@ pub async fn delete_records(
         let sql = format!("DELETE FROM {table} WHERE namespace = $1 AND ({filter_sql})");
         let mut q = sqlx::query(&sql).bind(&namespace);
         for p in &filter_params {
-            q = q.bind(p.as_str().unwrap_or(""));
+            q = match p {
+                serde_json::Value::String(s) => q.bind(s.as_str()),
+                _ => q.bind(p.to_string()),
+            };
         }
         q.execute(&state.pool).await?;
     } else {
@@ -580,7 +586,10 @@ pub async fn scroll_records(
 
     let mut query = sqlx::query(&sql).bind(&namespace).bind(&cursor);
     for p in &filter_params {
-        query = query.bind(p.as_str().unwrap_or(""));
+        query = match p {
+            serde_json::Value::String(s) => query.bind(s.as_str()),
+            _ => query.bind(p.to_string()),
+        };
     }
 
     let rows = query.fetch_all(&state.pool).await?;
@@ -683,7 +692,10 @@ pub async fn sample_records(
 
     let mut query = sqlx::query(&sql).bind(&namespace);
     for p in &filter_params {
-        query = query.bind(p.as_str().unwrap_or(""));
+        query = match p {
+            serde_json::Value::String(s) => query.bind(s.as_str()),
+            _ => query.bind(p.to_string()),
+        };
     }
 
     let rows = query.fetch_all(&state.pool).await?;
