@@ -13,7 +13,7 @@ async fn facets_basic_counts() {
 
     client
         .post(format!(
-            "{}/collections/{collection}/records/upsert",
+            "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -32,7 +32,7 @@ async fn facets_basic_counts() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{collection}/facets",
+            "{}/v1/collections/{collection}/facets",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -64,7 +64,7 @@ async fn facets_with_filter() {
 
     client
         .post(format!(
-            "{}/collections/{collection}/records/upsert",
+            "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -83,7 +83,7 @@ async fn facets_with_filter() {
     // Facet on category, but only for in_stock=true records
     let resp = client
         .post(format!(
-            "{}/collections/{collection}/facets",
+            "{}/v1/collections/{collection}/facets",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -115,7 +115,7 @@ async fn facets_excludes_records_missing_field() {
 
     client
         .post(format!(
-            "{}/collections/{collection}/records/upsert",
+            "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -132,7 +132,7 @@ async fn facets_excludes_records_missing_field() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{collection}/facets",
+            "{}/v1/collections/{collection}/facets",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -172,7 +172,7 @@ async fn facets_respects_limit() {
         .collect();
     client
         .post(format!(
-            "{}/collections/{collection}/records/upsert",
+            "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -183,7 +183,7 @@ async fn facets_respects_limit() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{collection}/facets",
+            "{}/v1/collections/{collection}/facets",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -207,7 +207,7 @@ async fn facets_empty_collection_returns_empty() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{collection}/facets",
+            "{}/v1/collections/{collection}/facets",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -232,7 +232,7 @@ async fn facets_invalid_field_name_returns_400() {
     for bad_field in &["bad field", "'; DROP TABLE--", "123starts_with_digit", ""] {
         let resp = client
             .post(format!(
-                "{}/collections/{collection}/facets",
+                "{}/v1/collections/{collection}/facets",
                 server.base_url
             ))
             .header("Api-Key", &server.api_key)
@@ -254,7 +254,7 @@ async fn facets_limit_out_of_range_returns_400() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{collection}/facets",
+            "{}/v1/collections/{collection}/facets",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -275,7 +275,7 @@ async fn query_cosine() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -291,7 +291,7 @@ async fn query_cosine() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/collections/{name}/query", server.base_url))
+        .post(format!("{}/v1/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -326,7 +326,7 @@ async fn query_euclidean() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -341,7 +341,7 @@ async fn query_euclidean() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/collections/{name}/query", server.base_url))
+        .post(format!("{}/v1/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -378,7 +378,7 @@ async fn query_dotproduct() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -393,7 +393,7 @@ async fn query_dotproduct() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/collections/{name}/query", server.base_url))
+        .post(format!("{}/v1/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -429,7 +429,7 @@ async fn query_with_metadata_filter() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -445,7 +445,7 @@ async fn query_with_metadata_filter() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/collections/{name}/query", server.base_url))
+        .post(format!("{}/v1/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -475,7 +475,7 @@ async fn query_top_k_too_large() {
     let client = Client::new();
 
     let resp = client
-        .post(format!("{}/collections/{name}/query", server.base_url))
+        .post(format!("{}/v1/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -497,7 +497,7 @@ async fn query_by_id() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -512,7 +512,7 @@ async fn query_by_id() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/collections/{name}/query", server.base_url))
+        .post(format!("{}/v1/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "id": "v1",
@@ -541,7 +541,7 @@ async fn query_namespace_isolation() {
     // Upsert to ns1
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -556,7 +556,7 @@ async fn query_namespace_isolation() {
     // Upsert to ns2
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -570,7 +570,7 @@ async fn query_namespace_isolation() {
 
     // Query ns1 -- should only get v1
     let resp = client
-        .post(format!("{}/collections/{name}/query", server.base_url))
+        .post(format!("{}/v1/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -587,7 +587,7 @@ async fn query_namespace_isolation() {
 
     // Query ns2 -- should only get v2
     let resp = client
-        .post(format!("{}/collections/{name}/query", server.base_url))
+        .post(format!("{}/v1/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
@@ -614,7 +614,7 @@ async fn query_score_threshold_filters_low_scores() {
     // v1 is identical to query (score ~1.0), v2 is orthogonal (score ~0.0)
     client
         .post(format!(
-            "{}/collections/{collection}/records/upsert",
+            "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -631,7 +631,7 @@ async fn query_score_threshold_filters_low_scores() {
     // High threshold — only v1 (score ~1.0) should pass
     let resp = client
         .post(format!(
-            "{}/collections/{collection}/query",
+            "{}/v1/collections/{collection}/query",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -661,7 +661,7 @@ async fn query_score_threshold_zero_returns_all() {
 
     client
         .post(format!(
-            "{}/collections/{collection}/records/upsert",
+            "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -677,7 +677,7 @@ async fn query_score_threshold_zero_returns_all() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{collection}/query",
+            "{}/v1/collections/{collection}/query",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -705,7 +705,7 @@ async fn query_score_threshold_out_of_range_returns_400() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{collection}/query",
+            "{}/v1/collections/{collection}/query",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -731,7 +731,7 @@ async fn batch_query_returns_multiple_results() {
 
     client
         .post(format!(
-            "{}/collections/{collection}/records/upsert",
+            "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -748,7 +748,7 @@ async fn batch_query_returns_multiple_results() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{collection}/query/batch",
+            "{}/v1/collections/{collection}/query/batch",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -784,7 +784,7 @@ async fn batch_query_empty_returns_400() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{collection}/query/batch",
+            "{}/v1/collections/{collection}/query/batch",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -810,7 +810,7 @@ async fn batch_query_exceeds_limit_returns_400() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{collection}/query/batch",
+            "{}/v1/collections/{collection}/query/batch",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -832,7 +832,7 @@ async fn query_group_by_metadata_field() {
 
     client
         .post(format!(
-            "{}/collections/{collection}/records/upsert",
+            "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -851,7 +851,7 @@ async fn query_group_by_metadata_field() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{collection}/query",
+            "{}/v1/collections/{collection}/query",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -871,11 +871,12 @@ async fn query_group_by_metadata_field() {
 
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
-    let groups = body["matches"].as_array().unwrap();
+    assert_eq!(body["grouped"], true);
+    let groups = body["groups"].as_array().unwrap();
     // Should have 2 groups: news-1 and sports-1
     assert_eq!(groups.len(), 2);
     // First group should be news-1 (higher scores)
-    assert_eq!(groups[0]["group"], "news-1");
+    assert_eq!(groups[0]["key"], "news-1");
     // Each group capped at groupSize=2
     assert!(groups[0]["matches"].as_array().unwrap().len() <= 2);
     assert!(groups[1]["matches"].as_array().unwrap().len() <= 2);
@@ -901,7 +902,7 @@ async fn query_group_by_caps_per_group() {
         .collect();
     client
         .post(format!(
-            "{}/collections/{collection}/records/upsert",
+            "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -912,7 +913,7 @@ async fn query_group_by_caps_per_group() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{collection}/query",
+            "{}/v1/collections/{collection}/query",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -927,7 +928,8 @@ async fn query_group_by_caps_per_group() {
         .unwrap();
 
     let body: serde_json::Value = resp.json().await.unwrap();
-    let groups = body["matches"].as_array().unwrap();
+    assert_eq!(body["grouped"], true);
+    let groups = body["groups"].as_array().unwrap();
     assert_eq!(groups.len(), 1);
     // Capped at groupSize=2 even though 5 records match
     assert_eq!(groups[0]["matches"].as_array().unwrap().len(), 2);
@@ -944,7 +946,7 @@ async fn query_without_group_by_returns_flat_matches() {
 
     client
         .post(format!(
-            "{}/collections/{collection}/records/upsert",
+            "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -957,7 +959,7 @@ async fn query_without_group_by_returns_flat_matches() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{collection}/query",
+            "{}/v1/collections/{collection}/query",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -985,7 +987,7 @@ async fn recommend_basic() {
 
     client
         .post(format!(
-            "{}/collections/{collection}/records/upsert",
+            "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -1003,7 +1005,7 @@ async fn recommend_basic() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{collection}/recommend",
+            "{}/v1/collections/{collection}/recommend",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -1034,7 +1036,7 @@ async fn recommend_with_negatives() {
 
     client
         .post(format!(
-            "{}/collections/{collection}/records/upsert",
+            "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -1053,7 +1055,7 @@ async fn recommend_with_negatives() {
     // Positive: v1=[1,0,0], Negative: v3=[0,1,0]
     let resp = client
         .post(format!(
-            "{}/collections/{collection}/recommend",
+            "{}/v1/collections/{collection}/recommend",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -1084,7 +1086,7 @@ async fn recommend_empty_positives_returns_400() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{collection}/recommend",
+            "{}/v1/collections/{collection}/recommend",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -1109,7 +1111,7 @@ async fn recommend_nonexistent_positive_returns_404() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{collection}/recommend",
+            "{}/v1/collections/{collection}/recommend",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)

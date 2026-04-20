@@ -33,7 +33,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: onecortex-vector:distroless
+    image: onecortex-vector:latest
     environment:
       ONECORTEX_VECTOR_DATABASE_URL: postgres://onecortex_vector:onecortex_vector@postgres:5432/onecortex_vector
       ONECORTEX_VECTOR_API_PORT: "8080"

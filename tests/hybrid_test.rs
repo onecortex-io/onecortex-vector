@@ -12,7 +12,7 @@ async fn hybrid_query_requires_bm25_enabled() {
     // Upsert a record
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -28,7 +28,7 @@ async fn hybrid_query_requires_bm25_enabled() {
     // Hybrid query on a non-BM25 collection should return 400
     let resp = client
         .post(format!(
-            "{}/collections/{name}/query/hybrid",
+            "{}/v1/collections/{name}/query/hybrid",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -57,7 +57,7 @@ async fn hybrid_query_returns_results() {
     // Upsert records with text content
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -74,7 +74,7 @@ async fn hybrid_query_returns_results() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{name}/query/hybrid",
+            "{}/v1/collections/{name}/query/hybrid",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -115,7 +115,7 @@ async fn hybrid_query_topk_max_enforced() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{name}/query/hybrid",
+            "{}/v1/collections/{name}/query/hybrid",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -140,7 +140,7 @@ async fn patch_index_enables_bm25() {
 
     // Enable BM25 via PATCH
     let resp = client
-        .patch(format!("{}/collections/{name}", server.base_url))
+        .patch(format!("{}/v1/collections/{name}", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "bm25Enabled": true }))
         .send()
@@ -150,7 +150,7 @@ async fn patch_index_enables_bm25() {
 
     // Describe should show bm25Enabled: true
     let resp = client
-        .get(format!("{}/collections/{name}", server.base_url))
+        .get(format!("{}/v1/collections/{name}", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await

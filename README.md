@@ -85,13 +85,13 @@ curl -s -X POST http://localhost:9090/admin/api_keys \
 API_KEY="<key-from-step-3>"
 
 # Create a collection
-curl -s -X POST http://localhost:8080/collections \
+curl -s -X POST http://localhost:8080/v1/collections \
   -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"name":"my-collection","dimension":3,"metric":"cosine"}'
 
 # Upsert records
-curl -s -X POST http://localhost:8080/collections/my-collection/records/upsert \
+curl -s -X POST http://localhost:8080/v1/collections/my-collection/records/upsert \
   -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -102,7 +102,7 @@ curl -s -X POST http://localhost:8080/collections/my-collection/records/upsert \
   }'
 
 # Query
-curl -s -X POST http://localhost:8080/collections/my-collection/query \
+curl -s -X POST http://localhost:8080/v1/collections/my-collection/query \
   -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"vector":[0.1,0.2,0.3],"topK":5,"includeMetadata":true}'
@@ -116,48 +116,48 @@ All data-plane endpoints require an `Api-Key` header.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/collections` | Create a collection |
-| GET | `/collections` | List all collections |
-| GET | `/collections/:name` | Describe a collection |
-| PATCH | `/collections/:name` | Configure a collection (tags, bm25) |
-| DELETE | `/collections/:name` | Delete a collection |
-| POST | `/collections/:name/describe_collection_stats` | Get collection statistics |
+| POST | `/v1/collections` | Create a collection |
+| GET | `/v1/collections` | List all collections |
+| GET | `/v1/collections/:name` | Describe a collection |
+| PATCH | `/v1/collections/:name` | Configure a collection (tags, bm25) |
+| DELETE | `/v1/collections/:name` | Delete a collection |
+| POST | `/v1/collections/:name/describe_collection_stats` | Get collection statistics |
 
 ### Data Plane
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/collections/:name/records/upsert` | Upsert records |
-| POST | `/collections/:name/records/fetch` | Fetch records by ID |
-| POST | `/collections/:name/records/fetch_by_metadata` | Fetch records by metadata filter |
-| POST | `/collections/:name/records/delete` | Delete records |
-| POST | `/collections/:name/records/update` | Update a record's metadata |
-| GET | `/collections/:name/records/list` | List record IDs (IDs only) |
-| POST | `/collections/:name/records/scroll` | Scroll all records with cursor pagination |
-| POST | `/collections/:name/sample` | Random sample of records |
-| POST | `/collections/:name/query` | Query nearest neighbors |
-| POST | `/collections/:name/query/hybrid` | Hybrid dense + BM25 query |
-| POST | `/collections/:name/query/batch` | Run up to 10 queries concurrently |
-| POST | `/collections/:name/recommend` | Recommend by positive/negative example IDs |
-| POST | `/collections/:name/facets` | Aggregated counts of distinct metadata values |
+| POST | `/v1/collections/:name/records/upsert` | Upsert records |
+| POST | `/v1/collections/:name/records/fetch` | Fetch records by ID |
+| POST | `/v1/collections/:name/records/fetch_by_metadata` | Fetch records by metadata filter |
+| POST | `/v1/collections/:name/records/delete` | Delete records |
+| POST | `/v1/collections/:name/records/update` | Update a record's metadata |
+| GET | `/v1/collections/:name/records/list` | List record IDs (IDs only) |
+| POST | `/v1/collections/:name/records/scroll` | Scroll all records with cursor pagination |
+| POST | `/v1/collections/:name/sample` | Random sample of records |
+| POST | `/v1/collections/:name/query` | Query nearest neighbors |
+| POST | `/v1/collections/:name/query/hybrid` | Hybrid dense + BM25 query |
+| POST | `/v1/collections/:name/query/batch` | Run up to 10 queries concurrently |
+| POST | `/v1/collections/:name/recommend` | Recommend by positive/negative example IDs |
+| POST | `/v1/collections/:name/facets` | Aggregated counts of distinct metadata values |
 
 ### Namespaces
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/collections/:name/namespaces` | List namespaces |
-| POST | `/collections/:name/namespaces` | Create a namespace |
-| GET | `/collections/:name/namespaces/:ns` | Describe a namespace |
-| DELETE | `/collections/:name/namespaces/:ns` | Delete a namespace |
+| GET | `/v1/collections/:name/namespaces` | List namespaces |
+| POST | `/v1/collections/:name/namespaces` | Create a namespace |
+| GET | `/v1/collections/:name/namespaces/:ns` | Describe a namespace |
+| DELETE | `/v1/collections/:name/namespaces/:ns` | Delete a namespace |
 
 ### Aliases
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/aliases` | Create or update an alias |
-| GET | `/aliases` | List all aliases |
-| GET | `/aliases/:alias` | Describe an alias |
-| DELETE | `/aliases/:alias` | Delete an alias |
+| POST | `/v1/aliases` | Create or update an alias |
+| GET | `/v1/aliases` | List all aliases |
+| GET | `/v1/aliases/:alias` | Describe an alias |
+| DELETE | `/v1/aliases/:alias` | Delete an alias |
 
 ### Health & Admin
 
@@ -179,13 +179,13 @@ Create a BM25-enabled collection, upsert records with text, and query with both 
 
 ```bash
 # Create with BM25 enabled
-curl -s -X POST http://localhost:8080/collections \
+curl -s -X POST http://localhost:8080/v1/collections \
   -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"name":"hybrid-col","dimension":3,"metric":"cosine","bm25_enabled":true}'
+  -d '{"name":"hybrid-col","dimension":3,"metric":"cosine","bm25Enabled":true}'
 
 # Upsert with text for BM25
-curl -s -X POST http://localhost:8080/collections/hybrid-col/records/upsert \
+curl -s -X POST http://localhost:8080/v1/collections/hybrid-col/records/upsert \
   -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -196,7 +196,7 @@ curl -s -X POST http://localhost:8080/collections/hybrid-col/records/upsert \
   }'
 
 # Hybrid query (dense + BM25, fused with RRF)
-curl -s -X POST http://localhost:8080/collections/hybrid-col/query/hybrid \
+curl -s -X POST http://localhost:8080/v1/collections/hybrid-col/query/hybrid \
   -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"vector":[1,0,0],"text":"machine learning","topK":5}'
@@ -207,7 +207,7 @@ curl -s -X POST http://localhost:8080/collections/hybrid-col/query/hybrid \
 Add a `rerank` object to any query to rerank results using a natural language query:
 
 ```bash
-curl -s -X POST http://localhost:8080/collections/my-collection/query \
+curl -s -X POST http://localhost:8080/v1/collections/my-collection/query \
   -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -249,7 +249,7 @@ Drop results below a minimum similarity score (applied after reranking):
 Send up to 10 queries in one round-trip; results are returned in the same order:
 
 ```bash
-curl -s -X POST http://localhost:8080/collections/my-collection/query/batch \
+curl -s -X POST http://localhost:8080/v1/collections/my-collection/query/batch \
   -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"queries":[{"vector":[1,0,0],"topK":5},{"vector":[0,1,0],"topK":3}]}'
@@ -268,7 +268,7 @@ Group results by a metadata field to ensure diversity across sources:
 Find similar items from example IDs — no query vector needed:
 
 ```bash
-curl -s -X POST http://localhost:8080/collections/my-collection/recommend \
+curl -s -X POST http://localhost:8080/v1/collections/my-collection/recommend \
   -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"positiveIds":["rec-1","rec-2"],"negativeIds":["rec-9"],"topK":10}'
@@ -316,7 +316,7 @@ Aliases resolve transparently on every endpoint, enabling zero-downtime collecti
 
 ```bash
 # Point "prod" at a new collection atomically
-curl -s -X POST http://localhost:8080/aliases \
+curl -s -X POST http://localhost:8080/v1/aliases \
   -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"alias":"prod","collectionName":"my-collection-v2"}'

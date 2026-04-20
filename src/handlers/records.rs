@@ -67,26 +67,25 @@ pub async fn resolve_collection(
 // --- Upsert ---
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpsertRequest {
     pub records: Vec<RecordInput>,
     pub namespace: Option<String>,
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecordInput {
     pub id: String,
     pub values: Vec<f32>,
-    /// Accepted but silently dropped -- see 00-reference.md section 8
-    #[serde(rename = "sparseValues")]
     pub sparse_values: Option<serde_json::Value>,
     pub metadata: Option<serde_json::Value>,
-    /// Text content for BM25 hybrid search (Phase 3). Stored in text_content column.
     pub text: Option<String>,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpsertResponse {
-    #[serde(rename = "upsertedCount")]
     pub upserted_count: i64,
 }
 
@@ -201,7 +200,26 @@ pub async fn upsert_records(
 
 // --- Fetch ---
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FetchRecord {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub values: Option<Vec<f32>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FetchResponse {
+    pub namespace: String,
+    pub records: Vec<FetchRecord>,
+    pub next_cursor: Option<String>,
+}
+
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FetchRequest {
     pub ids: Vec<String>,
     pub namespace: Option<String>,
@@ -212,7 +230,7 @@ pub async fn fetch_records(
     State(state): State<AppState>,
     axum::extract::Path(collection_name): axum::extract::Path<String>,
     Json(req): Json<FetchRequest>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+) -> Result<Json<FetchResponse>, ApiError> {
     if req.ids.len() > 1000 {
         return Err(ApiError::InvalidArgument(
             "ids array cannot exceed 1000 entries".to_string(),
@@ -230,32 +248,31 @@ pub async fn fetch_records(
     .fetch_all(&state.pool)
     .await?;
 
-    let mut records = serde_json::Map::new();
-    for row in rows {
-        let id: String = row.get("id");
-        let values_str: Option<String> = row.get("values");
-        let metadata: Option<serde_json::Value> = row.get("metadata");
+    let records: Vec<FetchRecord> = rows
+        .into_iter()
+        .map(|row| {
+            let id: String = row.get("id");
+            let values_str: Option<String> = row.get("values");
+            let metadata: Option<serde_json::Value> = row.get("metadata");
+            FetchRecord {
+                id,
+                values: values_str.map(|s| parse_pgvector_str(&s)),
+                metadata,
+            }
+        })
+        .collect();
 
-        let values: Option<Vec<f32>> = values_str.map(|s| parse_pgvector_str(&s));
-        records.insert(
-            id.clone(),
-            serde_json::json!({
-                "id": id,
-                "values": values.unwrap_or_default(),
-                "metadata": metadata.unwrap_or(serde_json::json!({})),
-            }),
-        );
-    }
-
-    Ok(Json(serde_json::json!({
-        "records": records,
-        "namespace": namespace,
-    })))
+    Ok(Json(FetchResponse {
+        namespace,
+        records,
+        next_cursor: None,
+    }))
 }
 
 // --- Fetch by metadata ---
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FetchByMetadataRequest {
     pub filter: serde_json::Value,
     pub namespace: Option<String>,
@@ -270,7 +287,7 @@ pub async fn fetch_by_metadata(
     State(state): State<AppState>,
     axum::extract::Path(collection_name): axum::extract::Path<String>,
     Json(req): Json<FetchByMetadataRequest>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+) -> Result<Json<FetchResponse>, ApiError> {
     let collection = resolve_collection(&state.pool, &collection_name).await?;
     let namespace = req.namespace.unwrap_or_default();
     let limit = req.limit.unwrap_or(100).min(1000);
@@ -301,29 +318,37 @@ pub async fn fetch_by_metadata(
 
     let rows = query.fetch_all(&state.pool).await?;
 
-    let records: Vec<serde_json::Value> = rows.into_iter().map(|row| {
-        let id: String = row.get("id");
-        let values_str: Option<String> = row.get("values");
-        let metadata: Option<serde_json::Value> = row.get("metadata");
-        let values: Vec<f32> = values_str.map(|s| parse_pgvector_str(&s)).unwrap_or_default();
-        serde_json::json!({
-            "id": id,
-            "values": if include_values { serde_json::json!(values) } else { serde_json::Value::Null },
-            "metadata": metadata,
+    let records: Vec<FetchRecord> = rows
+        .into_iter()
+        .map(|row| {
+            let id: String = row.get("id");
+            let values_str: Option<String> = row.get("values");
+            let metadata: Option<serde_json::Value> = row.get("metadata");
+            FetchRecord {
+                id,
+                values: if include_values {
+                    values_str.map(|s| parse_pgvector_str(&s))
+                } else {
+                    None
+                },
+                metadata,
+            }
         })
-    }).collect();
+        .collect();
 
-    Ok(Json(
-        serde_json::json!({ "records": records, "namespace": namespace }),
-    ))
+    Ok(Json(FetchResponse {
+        namespace,
+        records,
+        next_cursor: None,
+    }))
 }
 
 // --- Delete ---
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeleteRequest {
     pub ids: Option<Vec<String>>,
-    #[serde(rename = "deleteAll")]
     pub delete_all: Option<bool>,
     pub filter: Option<serde_json::Value>,
     pub namespace: Option<String>,
@@ -382,10 +407,10 @@ pub async fn delete_records(
 // --- Update ---
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateRequest {
     pub id: String,
     pub values: Option<Vec<f32>>,
-    #[serde(rename = "setMetadata")]
     pub set_metadata: Option<serde_json::Value>,
     pub text: Option<String>,
     pub namespace: Option<String>,
@@ -532,6 +557,7 @@ pub struct ScrollResponse {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScrollRecord {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -645,6 +671,7 @@ fn default_sample_size() -> i64 {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SampleResponse {
     pub records: Vec<ScrollRecord>,
     pub namespace: String,

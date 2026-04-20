@@ -17,7 +17,7 @@ async fn create_index_success() {
     let client = Client::new();
 
     let resp = client
-        .post(format!("{}/collections", server.base_url))
+        .post(format!("{}/v1/collections", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "name": name, "dimension": 3, "metric": "cosine" }))
         .send()
@@ -41,7 +41,7 @@ async fn create_index_duplicate() {
     let client = Client::new();
 
     let resp = client
-        .post(format!("{}/collections", server.base_url))
+        .post(format!("{}/v1/collections", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "name": name, "dimension": 3, "metric": "cosine" }))
         .send()
@@ -61,7 +61,7 @@ async fn create_index_bad_dimension() {
     let client = Client::new();
 
     let resp = client
-        .post(format!("{}/collections", server.base_url))
+        .post(format!("{}/v1/collections", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "name": "bad-dim-test", "dimension": 0, "metric": "cosine" }))
         .send()
@@ -79,7 +79,7 @@ async fn create_index_bad_dimension_too_large() {
     let client = Client::new();
 
     let resp = client
-        .post(format!("{}/collections", server.base_url))
+        .post(format!("{}/v1/collections", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "name": "bad-dim-large", "dimension": 20001, "metric": "cosine" }))
         .send()
@@ -95,7 +95,7 @@ async fn create_index_bad_metric() {
     let client = Client::new();
 
     let resp = client
-        .post(format!("{}/collections", server.base_url))
+        .post(format!("{}/v1/collections", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({ "name": "bad-metric", "dimension": 3, "metric": "hamming" }))
         .send()
@@ -112,7 +112,7 @@ async fn list_indexes() {
     let client = Client::new();
 
     let resp = client
-        .get(format!("{}/collections", server.base_url))
+        .get(format!("{}/v1/collections", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await
@@ -133,7 +133,7 @@ async fn describe_index() {
     let client = Client::new();
 
     let resp = client
-        .get(format!("{}/collections/{name}", server.base_url))
+        .get(format!("{}/v1/collections/{name}", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await
@@ -154,7 +154,10 @@ async fn describe_index_not_found() {
     let client = Client::new();
 
     let resp = client
-        .get(format!("{}/collections/nonexistent-index", server.base_url))
+        .get(format!(
+            "{}/v1/collections/nonexistent-index",
+            server.base_url
+        ))
         .header("Api-Key", &server.api_key)
         .send()
         .await
@@ -170,7 +173,7 @@ async fn delete_index() {
     let client = Client::new();
 
     let resp = client
-        .delete(format!("{}/collections/{name}", server.base_url))
+        .delete(format!("{}/v1/collections/{name}", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await
@@ -179,7 +182,7 @@ async fn delete_index() {
 
     // Subsequent GET should return 404
     let resp = client
-        .get(format!("{}/collections/{name}", server.base_url))
+        .get(format!("{}/v1/collections/{name}", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await
@@ -194,9 +197,9 @@ async fn configure_index() {
     let client = Client::new();
 
     let resp = client
-        .patch(format!("{}/collections/{name}", server.base_url))
+        .patch(format!("{}/v1/collections/{name}", server.base_url))
         .header("Api-Key", &server.api_key)
-        .json(&json!({ "deletion_protection": "enabled" }))
+        .json(&json!({ "deletionProtected": true }))
         .send()
         .await
         .unwrap();
@@ -219,16 +222,16 @@ async fn deletion_protection_blocks_delete() {
 
     // Enable deletion protection
     client
-        .patch(format!("{}/collections/{name}", server.base_url))
+        .patch(format!("{}/v1/collections/{name}", server.base_url))
         .header("Api-Key", &server.api_key)
-        .json(&json!({ "deletion_protection": "enabled" }))
+        .json(&json!({ "deletionProtected": true }))
         .send()
         .await
         .unwrap();
 
     // Try to delete -- should get 403
     let resp = client
-        .delete(format!("{}/collections/{name}", server.base_url))
+        .delete(format!("{}/v1/collections/{name}", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await
@@ -239,9 +242,9 @@ async fn deletion_protection_blocks_delete() {
 
     // Disable protection and cleanup
     client
-        .patch(format!("{}/collections/{name}", server.base_url))
+        .patch(format!("{}/v1/collections/{name}", server.base_url))
         .header("Api-Key", &server.api_key)
-        .json(&json!({ "deletion_protection": "disabled" }))
+        .json(&json!({ "deletionProtected": false }))
         .send()
         .await
         .unwrap();
@@ -257,7 +260,7 @@ async fn describe_index_stats() {
     // Upsert some records first
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -276,7 +279,7 @@ async fn describe_index_stats() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{name}/describe_collection_stats",
+            "{}/v1/collections/{name}/describe_collection_stats",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)

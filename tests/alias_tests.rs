@@ -11,7 +11,7 @@ async fn create_and_query_via_alias() {
     // Upsert a record into the real collection
     client
         .post(format!(
-            "{}/collections/{collection}/records/upsert",
+            "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -24,7 +24,7 @@ async fn create_and_query_via_alias() {
 
     // Create alias "prod" -> collection
     let resp = client
-        .post(format!("{}/aliases", server.base_url))
+        .post(format!("{}/v1/aliases", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({"alias": "prod", "collectionName": collection}))
         .send()
@@ -34,7 +34,7 @@ async fn create_and_query_via_alias() {
 
     // Query via alias — should work transparently
     let resp = client
-        .post(format!("{}/collections/prod/query", server.base_url))
+        .post(format!("{}/v1/collections/prod/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({"vector": [1.0, 0.0, 0.0], "topK": 1}))
         .send()
@@ -46,7 +46,7 @@ async fn create_and_query_via_alias() {
 
     // Cleanup
     client
-        .delete(format!("{}/aliases/prod", server.base_url))
+        .delete(format!("{}/v1/aliases/prod", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await
@@ -62,14 +62,14 @@ async fn list_aliases() {
 
     // Create two aliases
     client
-        .post(format!("{}/aliases", server.base_url))
+        .post(format!("{}/v1/aliases", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({"alias": "alias-a", "collectionName": collection}))
         .send()
         .await
         .unwrap();
     client
-        .post(format!("{}/aliases", server.base_url))
+        .post(format!("{}/v1/aliases", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({"alias": "alias-b", "collectionName": collection}))
         .send()
@@ -77,7 +77,7 @@ async fn list_aliases() {
         .unwrap();
 
     let resp = client
-        .get(format!("{}/aliases", server.base_url))
+        .get(format!("{}/v1/aliases", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await
@@ -89,13 +89,13 @@ async fn list_aliases() {
 
     // Cleanup
     client
-        .delete(format!("{}/aliases/alias-a", server.base_url))
+        .delete(format!("{}/v1/aliases/alias-a", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await
         .unwrap();
     client
-        .delete(format!("{}/aliases/alias-b", server.base_url))
+        .delete(format!("{}/v1/aliases/alias-b", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await
@@ -112,7 +112,7 @@ async fn update_alias_target() {
 
     // Create alias pointing to collection1
     client
-        .post(format!("{}/aliases", server.base_url))
+        .post(format!("{}/v1/aliases", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({"alias": "swap-test", "collectionName": collection1}))
         .send()
@@ -121,7 +121,7 @@ async fn update_alias_target() {
 
     // Update alias to point to collection2 (upsert semantics via POST)
     let resp = client
-        .post(format!("{}/aliases", server.base_url))
+        .post(format!("{}/v1/aliases", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({"alias": "swap-test", "collectionName": collection2}))
         .send()
@@ -131,7 +131,7 @@ async fn update_alias_target() {
 
     // Describe alias — should now point to collection2
     let resp = client
-        .get(format!("{}/aliases/swap-test", server.base_url))
+        .get(format!("{}/v1/aliases/swap-test", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await
@@ -142,7 +142,7 @@ async fn update_alias_target() {
 
     // Cleanup
     client
-        .delete(format!("{}/aliases/swap-test", server.base_url))
+        .delete(format!("{}/v1/aliases/swap-test", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await
@@ -157,7 +157,7 @@ async fn delete_nonexistent_alias_returns_404() {
     let client = reqwest::Client::new();
 
     let resp = client
-        .delete(format!("{}/aliases/nonexistent", server.base_url))
+        .delete(format!("{}/v1/aliases/nonexistent", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await
@@ -171,7 +171,7 @@ async fn alias_to_nonexistent_collection_returns_404() {
     let client = reqwest::Client::new();
 
     let resp = client
-        .post(format!("{}/aliases", server.base_url))
+        .post(format!("{}/v1/aliases", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({"alias": "bad", "collectionName": "nonexistent-col"}))
         .send()

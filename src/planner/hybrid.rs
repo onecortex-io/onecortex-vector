@@ -4,23 +4,21 @@ use sqlx::{PgPool, Row};
 use crate::planner::filter_translator::translate_filter;
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HybridQueryRequest {
     pub vector: Vec<f32>,
     pub text: String,
-    #[serde(rename = "topK")]
     pub top_k: i64,
     #[serde(default = "default_alpha")]
     pub alpha: f32,
     pub filter: Option<serde_json::Value>,
     #[serde(default)]
     pub namespace: String,
-    #[serde(rename = "includeMetadata", default)]
+    #[serde(default)]
     pub include_metadata: bool,
-    #[serde(rename = "includeValues", default)]
+    #[serde(default)]
     pub include_values: bool,
-    /// If present, reranking is performed after RRF fusion.
     pub rerank: Option<crate::handlers::query::RerankOptions>,
-    #[serde(rename = "scoreThreshold")]
     pub score_threshold: Option<f64>,
 }
 
@@ -29,6 +27,7 @@ fn default_alpha() -> f32 {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HybridMatch {
     pub id: String,
     pub score: f64,
@@ -39,6 +38,7 @@ pub struct HybridMatch {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HybridQueryResponse {
     pub matches: Vec<HybridMatch>,
     pub namespace: String,

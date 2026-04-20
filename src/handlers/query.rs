@@ -25,22 +25,19 @@ fn default_rank_field() -> String {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct QueryRequest {
     pub vector: Option<Vec<f32>>,
     pub id: Option<String>,
-    #[serde(rename = "topK")]
     pub top_k: i64,
     pub namespace: Option<String>,
     pub filter: Option<serde_json::Value>,
-    #[serde(rename = "includeValues", default)]
+    #[serde(default)]
     pub include_values: bool,
-    #[serde(rename = "includeMetadata", default)]
+    #[serde(default)]
     pub include_metadata: bool,
-    /// If present, reranking is performed after ANN retrieval.
     pub rerank: Option<RerankOptions>,
-    #[serde(rename = "scoreThreshold")]
     pub score_threshold: Option<f64>,
-    #[serde(rename = "groupBy")]
     pub group_by: Option<GroupByOptions>,
 }
 
@@ -62,13 +59,29 @@ fn default_group_size() -> usize {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct QueryResponse {
-    pub results: Vec<serde_json::Value>,
-    pub matches: Vec<Match>,
     pub namespace: String,
+    pub matches: Vec<Match>,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupResult {
+    pub key: String,
+    pub matches: Vec<Match>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupedQueryResponse {
+    pub namespace: String,
+    pub grouped: bool,
+    pub groups: Vec<GroupResult>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Match {
     pub id: String,
     pub score: f64,
@@ -79,11 +92,13 @@ pub struct Match {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BatchQueryRequest {
     pub queries: Vec<QueryRequest>,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BatchQueryResponse {
     pub results: Vec<serde_json::Value>,
 }
@@ -322,10 +337,10 @@ pub async fn query_vectors(
     // Grouping: bucket matches by a metadata field value
     if let Some(group_opts) = &req.group_by {
         let mut group_order: Vec<String> = Vec::new();
-        let mut groups: std::collections::HashMap<String, Vec<serde_json::Value>> =
+        let mut groups_map: std::collections::HashMap<String, Vec<Match>> =
             std::collections::HashMap::new();
 
-        for m in &matches {
+        for m in matches {
             let group_key = m
                 .metadata
                 .as_ref()
@@ -336,50 +351,45 @@ pub async fn query_vectors(
                 })
                 .unwrap_or_default();
 
-            if !groups.contains_key(&group_key) {
+            if !groups_map.contains_key(&group_key) {
                 group_order.push(group_key.clone());
             }
-            let entry = groups.entry(group_key).or_default();
+            let entry = groups_map.entry(group_key).or_default();
             if entry.len() < group_opts.group_size {
-                let mut match_val = serde_json::json!({
-                    "id": m.id,
-                    "score": m.score,
+                entry.push(Match {
+                    id: m.id,
+                    score: m.score,
+                    values: if req.include_values { m.values } else { None },
+                    metadata: if req.include_metadata {
+                        m.metadata
+                    } else {
+                        None
+                    },
                 });
-                if req.include_values {
-                    match_val["values"] = serde_json::json!(m.values);
-                }
-                if req.include_metadata {
-                    match_val["metadata"] = serde_json::json!(m.metadata);
-                }
-                entry.push(match_val);
             }
         }
 
-        let grouped: Vec<serde_json::Value> = group_order
+        let groups: Vec<GroupResult> = group_order
             .into_iter()
             .take(group_opts.limit)
-            .map(|key| {
-                serde_json::json!({
-                    "group": key,
-                    "matches": groups.remove(&key).unwrap_or_default(),
-                })
+            .map(|key| GroupResult {
+                matches: groups_map.remove(&key).unwrap_or_default(),
+                key,
             })
             .collect();
 
-        return Ok(Json(serde_json::json!({
-            "results": [],
-            "matches": grouped,
-            "namespace": namespace,
-        })));
+        return Ok(Json(
+            serde_json::to_value(GroupedQueryResponse {
+                namespace,
+                grouped: true,
+                groups,
+            })
+            .unwrap(),
+        ));
     }
 
     Ok(Json(
-        serde_json::to_value(QueryResponse {
-            results: vec![],
-            matches,
-            namespace,
-        })
-        .unwrap(),
+        serde_json::to_value(QueryResponse { namespace, matches }).unwrap(),
     ))
 }
 
@@ -629,12 +639,14 @@ fn default_facet_limit() -> i64 {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FacetEntry {
     pub value: String,
     pub count: i64,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FacetsResponse {
     pub facets: Vec<FacetEntry>,
     pub field: String,
@@ -734,19 +746,18 @@ pub struct RecommendRequest {
     pub positive_ids: Vec<String>,
     #[serde(default)]
     pub negative_ids: Vec<String>,
-    #[serde(rename = "topK")]
     pub top_k: i64,
     pub namespace: Option<String>,
     pub filter: Option<serde_json::Value>,
-    #[serde(rename = "includeValues", default)]
+    #[serde(default)]
     pub include_values: bool,
-    #[serde(rename = "includeMetadata", default)]
+    #[serde(default)]
     pub include_metadata: bool,
-    #[serde(rename = "scoreThreshold")]
     pub score_threshold: Option<f64>,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecommendResponse {
     pub matches: Vec<Match>,
     pub namespace: String,

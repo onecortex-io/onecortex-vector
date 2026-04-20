@@ -12,7 +12,7 @@ async fn upsert_and_fetch() {
     // Upsert
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -32,7 +32,7 @@ async fn upsert_and_fetch() {
     // Fetch
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/fetch",
+            "{}/v1/collections/{name}/records/fetch",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -42,9 +42,12 @@ async fn upsert_and_fetch() {
         .unwrap();
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert!(body["records"]["v1"].is_object());
-    assert!(body["records"]["v2"].is_object());
-    assert_eq!(body["records"]["v1"]["metadata"]["color"], "red");
+    let records = body["records"].as_array().unwrap();
+    let v1 = records.iter().find(|r| r["id"] == "v1").unwrap();
+    let v2 = records.iter().find(|r| r["id"] == "v2").unwrap();
+    assert!(v1.is_object());
+    assert!(v2.is_object());
+    assert_eq!(v1["metadata"]["color"], "red");
 
     common::cleanup_index(&server, &name).await;
 }
@@ -61,7 +64,7 @@ async fn upsert_batch_too_large() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -82,7 +85,7 @@ async fn upsert_dimension_mismatch() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -106,7 +109,7 @@ async fn upsert_sparse_values_accepted() {
     // sparseValues should be accepted without error
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -134,7 +137,7 @@ async fn fetch_by_metadata_eq() {
     // Upsert records with metadata
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -150,7 +153,7 @@ async fn fetch_by_metadata_eq() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/fetch_by_metadata",
+            "{}/v1/collections/{name}/records/fetch_by_metadata",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -175,7 +178,7 @@ async fn fetch_by_metadata_in() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -192,7 +195,7 @@ async fn fetch_by_metadata_in() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/fetch_by_metadata",
+            "{}/v1/collections/{name}/records/fetch_by_metadata",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -216,7 +219,7 @@ async fn delete_by_ids() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -233,7 +236,7 @@ async fn delete_by_ids() {
     // Delete v1
     client
         .post(format!(
-            "{}/collections/{name}/records/delete",
+            "{}/v1/collections/{name}/records/delete",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -245,7 +248,7 @@ async fn delete_by_ids() {
     // Fetch -- v1 should be gone
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/fetch",
+            "{}/v1/collections/{name}/records/fetch",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -254,8 +257,9 @@ async fn delete_by_ids() {
         .await
         .unwrap();
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert!(body["records"]["v1"].is_null());
-    assert!(body["records"]["v2"].is_object());
+    let records = body["records"].as_array().unwrap();
+    assert!(!records.iter().any(|r| r["id"] == "v1"));
+    assert!(records.iter().any(|r| r["id"] == "v2"));
 
     common::cleanup_index(&server, &name).await;
 }
@@ -268,7 +272,7 @@ async fn delete_by_filter() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -284,7 +288,7 @@ async fn delete_by_filter() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/delete",
+            "{}/v1/collections/{name}/records/delete",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -295,7 +299,7 @@ async fn delete_by_filter() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/fetch",
+            "{}/v1/collections/{name}/records/fetch",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -304,8 +308,9 @@ async fn delete_by_filter() {
         .await
         .unwrap();
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert!(body["records"]["v1"].is_null());
-    assert!(body["records"]["v2"].is_object());
+    let records = body["records"].as_array().unwrap();
+    assert!(!records.iter().any(|r| r["id"] == "v1"));
+    assert!(records.iter().any(|r| r["id"] == "v2"));
 
     common::cleanup_index(&server, &name).await;
 }
@@ -318,7 +323,7 @@ async fn delete_all() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -334,7 +339,7 @@ async fn delete_all() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/delete",
+            "{}/v1/collections/{name}/records/delete",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -345,7 +350,7 @@ async fn delete_all() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/fetch",
+            "{}/v1/collections/{name}/records/fetch",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -354,7 +359,7 @@ async fn delete_all() {
         .await
         .unwrap();
     let body: serde_json::Value = resp.json().await.unwrap();
-    let records = body["records"].as_object().unwrap();
+    let records = body["records"].as_array().unwrap();
     assert!(records.is_empty());
 
     common::cleanup_index(&server, &name).await;
@@ -368,7 +373,7 @@ async fn update_metadata() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -382,7 +387,7 @@ async fn update_metadata() {
     // Update: merge metadata
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/update",
+            "{}/v1/collections/{name}/records/update",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -395,7 +400,7 @@ async fn update_metadata() {
     // Fetch and verify merge
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/fetch",
+            "{}/v1/collections/{name}/records/fetch",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -404,8 +409,10 @@ async fn update_metadata() {
         .await
         .unwrap();
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["records"]["v1"]["metadata"]["a"], 1);
-    assert_eq!(body["records"]["v1"]["metadata"]["b"], 2);
+    let records = body["records"].as_array().unwrap();
+    let v1 = records.iter().find(|r| r["id"] == "v1").unwrap();
+    assert_eq!(v1["metadata"]["a"], 1);
+    assert_eq!(v1["metadata"]["b"], 2);
 
     common::cleanup_index(&server, &name).await;
 }
@@ -418,7 +425,7 @@ async fn list_vectors_with_prefix() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -435,7 +442,7 @@ async fn list_vectors_with_prefix() {
 
     let resp = client
         .get(format!(
-            "{}/collections/{name}/records/list?prefix=doc-",
+            "{}/v1/collections/{name}/records/list?prefix=doc-",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -458,7 +465,7 @@ async fn list_vectors_pagination() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -476,7 +483,7 @@ async fn list_vectors_pagination() {
     // First page: limit=2
     let resp = client
         .get(format!(
-            "{}/collections/{name}/records/list?limit=2",
+            "{}/v1/collections/{name}/records/list?limit=2",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -491,7 +498,7 @@ async fn list_vectors_pagination() {
     // Second page
     let resp = client
         .get(format!(
-            "{}/collections/{name}/records/list?limit=2&paginationToken={next}",
+            "{}/v1/collections/{name}/records/list?limit=2&paginationToken={next}",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -513,7 +520,7 @@ async fn scroll_returns_full_vector_data() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -529,7 +536,7 @@ async fn scroll_returns_full_vector_data() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/scroll",
+            "{}/v1/collections/{name}/records/scroll",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -564,7 +571,7 @@ async fn scroll_pagination_with_cursor() {
         .collect();
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -576,7 +583,7 @@ async fn scroll_pagination_with_cursor() {
     // Page 1: limit=2
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/scroll",
+            "{}/v1/collections/{name}/records/scroll",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -592,7 +599,7 @@ async fn scroll_pagination_with_cursor() {
     let cursor = body["nextCursor"].as_str().unwrap();
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/scroll",
+            "{}/v1/collections/{name}/records/scroll",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -607,7 +614,7 @@ async fn scroll_pagination_with_cursor() {
     let cursor = body["nextCursor"].as_str().unwrap();
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/scroll",
+            "{}/v1/collections/{name}/records/scroll",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -630,7 +637,7 @@ async fn scroll_with_filter() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -647,7 +654,7 @@ async fn scroll_with_filter() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/scroll",
+            "{}/v1/collections/{name}/records/scroll",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -681,7 +688,7 @@ async fn sample_returns_random_vectors() {
         .collect();
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -691,7 +698,7 @@ async fn sample_returns_random_vectors() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/collections/{name}/sample", server.base_url))
+        .post(format!("{}/v1/collections/{name}/sample", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({"size": 5, "includeMetadata": true}))
         .send()
@@ -715,7 +722,7 @@ async fn sample_with_filter() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -731,7 +738,7 @@ async fn sample_with_filter() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/collections/{name}/sample", server.base_url))
+        .post(format!("{}/v1/collections/{name}/sample", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "size": 10,
@@ -763,7 +770,7 @@ async fn filter_gte_datetime() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -779,7 +786,7 @@ async fn filter_gte_datetime() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/fetch_by_metadata",
+            "{}/v1/collections/{name}/records/fetch_by_metadata",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -804,7 +811,7 @@ async fn filter_lt_datetime() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -820,7 +827,7 @@ async fn filter_lt_datetime() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/fetch_by_metadata",
+            "{}/v1/collections/{name}/records/fetch_by_metadata",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -846,7 +853,7 @@ async fn filter_geo_radius() {
     // New York City and Los Angeles
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -863,7 +870,7 @@ async fn filter_geo_radius() {
     // 1 km radius around NYC — should only match nyc
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/fetch_by_metadata",
+            "{}/v1/collections/{name}/records/fetch_by_metadata",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -892,7 +899,7 @@ async fn filter_geo_bbox() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -909,7 +916,7 @@ async fn filter_geo_bbox() {
     // Bounding box covering the NYC metro area only
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/fetch_by_metadata",
+            "{}/v1/collections/{name}/records/fetch_by_metadata",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -941,7 +948,7 @@ async fn filter_elem_match_hit() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -957,7 +964,7 @@ async fn filter_elem_match_hit() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/fetch_by_metadata",
+            "{}/v1/collections/{name}/records/fetch_by_metadata",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -982,7 +989,7 @@ async fn filter_elem_match_no_results() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -998,7 +1005,7 @@ async fn filter_elem_match_no_results() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{name}/records/fetch_by_metadata",
+            "{}/v1/collections/{name}/records/fetch_by_metadata",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)

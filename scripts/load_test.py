@@ -379,9 +379,9 @@ def create_api_key(admin_url: str) -> str:
 def create_collection(base_url: str, api_key: str, name: str, dim: int) -> None:
     print(f"▶ Creating collection '{name}' (dim={dim}, metric=cosine, bm25=true) …")
     req = urllib.request.Request(
-        f"{base_url}/collections",
+        f"{base_url}/v1/collections",
         data=json.dumps(
-            {"name": name, "dimension": dim, "metric": "cosine", "bm25_enabled": True}
+            {"name": name, "dimension": dim, "metric": "cosine", "bm25Enabled": True}
         ).encode(),
         headers={"Content-Type": "application/json", "Api-Key": api_key},
         method="POST",
@@ -407,7 +407,7 @@ def bulk_upsert(
     centroids: list[list[float]],
 ) -> None:
     print(f"▶ Upserting {total:,} records in batches of {batch_size} …")
-    url = f"{base_url}/collections/{name}/records/upsert"
+    url = f"{base_url}/v1/collections/{name}/records/upsert"
     batches = math.ceil(total / batch_size)
     centroid_domains = [
         DOMAIN_NAMES[j % len(DOMAIN_NAMES)] for j in range(len(centroids))
@@ -458,7 +458,7 @@ def query_worker(
     centroids: list[list[float]],
     centroid_domains: list[str],
 ) -> None:
-    url = f"{base_url}/collections/{name}/query/hybrid"
+    url = f"{base_url}/v1/collections/{name}/query/hybrid"
     while not stop_event.is_set():
         ci = random.randrange(len(centroids))
         domain = centroid_domains[ci]
@@ -581,7 +581,7 @@ def run_query_load(
 
 def delete_collection(base_url: str, api_key: str, name: str) -> None:
     req = urllib.request.Request(
-        f"{base_url}/collections/{name}",
+        f"{base_url}/v1/collections/{name}",
         headers={"Api-Key": api_key},
         method="DELETE",
     )

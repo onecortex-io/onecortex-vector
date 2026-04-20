@@ -14,7 +14,7 @@ async fn test_query_without_rerank_unchanged() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -28,7 +28,7 @@ async fn test_query_without_rerank_unchanged() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/collections/{name}/query", server.base_url))
+        .post(format!("{}/v1/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({"vector": [0.1, 0.2, 0.3], "topK": 1}))
         .send()
@@ -52,7 +52,7 @@ async fn test_rerank_top_n_truncates_results() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -68,7 +68,7 @@ async fn test_rerank_top_n_truncates_results() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/collections/{name}/query", server.base_url))
+        .post(format!("{}/v1/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [0.1, 0.2, 0.3],
@@ -95,7 +95,7 @@ async fn test_rerank_top_n_defaults_to_top_k() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -110,7 +110,7 @@ async fn test_rerank_top_n_defaults_to_top_k() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/collections/{name}/query", server.base_url))
+        .post(format!("{}/v1/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [0.1, 0.2, 0.3],
@@ -138,7 +138,7 @@ async fn test_rerank_missing_rank_field_falls_back_to_id() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -152,7 +152,7 @@ async fn test_rerank_missing_rank_field_falls_back_to_id() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/collections/{name}/query", server.base_url))
+        .post(format!("{}/v1/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [0.1, 0.2, 0.3],
@@ -177,7 +177,7 @@ async fn test_rerank_custom_rank_field() {
     let name = common::create_test_index(&server, 3, "cosine").await;
     let client = Client::new();
 
-    client.post(format!("{}/collections/{name}/records/upsert", server.base_url))
+    client.post(format!("{}/v1/collections/{name}/records/upsert", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
@@ -188,7 +188,7 @@ async fn test_rerank_custom_rank_field() {
         .send().await.unwrap();
 
     let resp = client
-        .post(format!("{}/collections/{name}/query", server.base_url))
+        .post(format!("{}/v1/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [0.1, 0.2, 0.3],
@@ -217,7 +217,7 @@ async fn test_hybrid_query_with_rerank() {
     // Upsert records with text content for BM25
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -234,7 +234,7 @@ async fn test_hybrid_query_with_rerank() {
 
     let resp = client
         .post(format!(
-            "{}/collections/{name}/query/hybrid",
+            "{}/v1/collections/{name}/query/hybrid",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -266,7 +266,7 @@ async fn test_rerank_top_n_larger_than_results_returns_all() {
 
     client
         .post(format!(
-            "{}/collections/{name}/records/upsert",
+            "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
         .header("Api-Key", &server.api_key)
@@ -280,7 +280,7 @@ async fn test_rerank_top_n_larger_than_results_returns_all() {
         .unwrap();
 
     let resp = client
-        .post(format!("{}/collections/{name}/query", server.base_url))
+        .post(format!("{}/v1/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [0.1, 0.2, 0.3],
@@ -304,7 +304,7 @@ async fn test_rerank_empty_index_returns_empty_matches() {
     let client = Client::new();
 
     let resp = client
-        .post(format!("{}/collections/{name}/query", server.base_url))
+        .post(format!("{}/v1/collections/{name}/query", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [0.1, 0.2, 0.3],

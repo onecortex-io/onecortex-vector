@@ -7,7 +7,7 @@ async fn no_key_returns_401() {
     let server = common::start_test_server().await;
     let client = Client::new();
     let resp = client
-        .get(format!("{}/collections", server.base_url))
+        .get(format!("{}/v1/collections", server.base_url))
         .send()
         .await
         .unwrap();
@@ -21,7 +21,7 @@ async fn wrong_key_returns_401() {
     let server = common::start_test_server().await;
     let client = Client::new();
     let resp = client
-        .get(format!("{}/collections", server.base_url))
+        .get(format!("{}/v1/collections", server.base_url))
         .header("Api-Key", "totally-wrong-key")
         .send()
         .await
@@ -36,7 +36,7 @@ async fn valid_key_passes() {
     let server = common::start_test_server().await;
     let client = Client::new();
     let resp = client
-        .get(format!("{}/collections", server.base_url))
+        .get(format!("{}/v1/collections", server.base_url))
         .header("Api-Key", &server.api_key)
         .send()
         .await

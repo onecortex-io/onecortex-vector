@@ -56,67 +56,76 @@ fn build_test_router(state: onecortex_vector::state::AppState) -> axum::Router {
         .route("/ready", get(health::ready))
         .route("/version", get(health::version))
         .route(
-            "/collections",
+            "/v1/collections",
             get(collections::list_collections).post(collections::create_collection),
         )
         .route(
-            "/collections/:name",
+            "/v1/collections/:name",
             get(collections::describe_collection)
                 .delete(collections::delete_collection)
                 .patch(collections::configure_collection),
         )
         .route(
-            "/collections/:name/describe_collection_stats",
+            "/v1/collections/:name/describe_collection_stats",
             post(collections::describe_collection_stats),
         )
         .route(
-            "/collections/:name/records/upsert",
+            "/v1/collections/:name/records/upsert",
             post(records::upsert_records),
         )
         .route(
-            "/collections/:name/records/fetch",
+            "/v1/collections/:name/records/fetch",
             post(records::fetch_records),
         )
         .route(
-            "/collections/:name/records/fetch_by_metadata",
+            "/v1/collections/:name/records/fetch_by_metadata",
             post(records::fetch_by_metadata),
         )
         .route(
-            "/collections/:name/records/delete",
+            "/v1/collections/:name/records/delete",
             post(records::delete_records),
         )
         .route(
-            "/collections/:name/records/update",
+            "/v1/collections/:name/records/update",
             post(records::update_record),
         )
         .route(
-            "/collections/:name/records/list",
+            "/v1/collections/:name/records/list",
             get(records::list_records),
         )
         .route(
-            "/collections/:name/records/scroll",
+            "/v1/collections/:name/records/scroll",
             post(records::scroll_records),
         )
-        .route("/collections/:name/sample", post(records::sample_records))
-        .route("/collections/:name/query", post(query::query_vectors))
-        .route("/collections/:name/query/hybrid", post(query::query_hybrid))
-        .route("/collections/:name/query/batch", post(query::query_batch))
-        .route("/collections/:name/recommend", post(query::recommend))
-        .route("/collections/:name/facets", post(query::facets))
         .route(
-            "/collections/:name/namespaces",
+            "/v1/collections/:name/sample",
+            post(records::sample_records),
+        )
+        .route("/v1/collections/:name/query", post(query::query_vectors))
+        .route(
+            "/v1/collections/:name/query/hybrid",
+            post(query::query_hybrid),
+        )
+        .route(
+            "/v1/collections/:name/query/batch",
+            post(query::query_batch),
+        )
+        .route("/v1/collections/:name/recommend", post(query::recommend))
+        .route("/v1/collections/:name/facets", post(query::facets))
+        .route(
+            "/v1/collections/:name/namespaces",
             get(namespaces::list_namespaces).post(namespaces::create_namespace),
         )
         .route(
-            "/collections/:name/namespaces/:ns",
+            "/v1/collections/:name/namespaces/:ns",
             get(namespaces::describe_namespace).delete(namespaces::delete_namespace),
         )
         .route(
-            "/aliases",
+            "/v1/aliases",
             get(aliases::list_aliases).post(aliases::create_alias),
         )
         .route(
-            "/aliases/:alias",
+            "/v1/aliases/:alias",
             get(aliases::describe_alias).delete(aliases::delete_alias),
         )
         .layer(axum::middleware::from_fn_with_state(
@@ -134,7 +143,7 @@ pub async fn create_test_index(server: &TestServer, dimension: i32, metric: &str
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/collections", server.base_url))
+        .post(format!("{}/v1/collections", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&serde_json::json!({
             "name": name,
@@ -164,13 +173,13 @@ pub async fn create_test_index_with_bm25(
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/collections", server.base_url))
+        .post(format!("{}/v1/collections", server.base_url))
         .header("Api-Key", &server.api_key)
         .json(&serde_json::json!({
             "name": name,
             "dimension": dimension,
             "metric": metric,
-            "bm25_enabled": true,
+            "bm25Enabled": true,
         }))
         .send()
         .await
@@ -188,7 +197,7 @@ pub async fn create_test_index_with_bm25(
 pub async fn cleanup_index(server: &TestServer, name: &str) {
     let client = reqwest::Client::new();
     let _ = client
-        .delete(format!("{}/collections/{}", server.base_url, name))
+        .delete(format!("{}/v1/collections/{}", server.base_url, name))
         .header("Api-Key", &server.api_key)
         .send()
         .await;

@@ -30,6 +30,11 @@ cargo clippy -- -D warnings
 | Euclidean score | `1/(1+dist)` |
 | SPARSEVEC | Not stored; `sparseValues` in upsert requests is silently dropped + WARN logged |
 | BM25 score | `<@>` returns negative; always negate before ranking |
+| API prefix | All public routes are under `/v1/`; health endpoints (`/health`, `/ready`, `/version`) are unversioned |
+| JSON casing | All request/response fields use camelCase (`bm25Enabled`, `topK`, `includeMetadata`, `deletionProtected`) — `#[serde(rename_all = "camelCase")]` on every DTO |
+| `deletionProtected` | Boolean (`true`/`false`) in both request and response; never the old `"enabled"/"disabled"` string enum |
+| Query response | `{ namespace, matches: [...] }` — no `results: []` field; grouped queries return `{ namespace, grouped: true, groups: [{key, matches}] }` |
+| Fetch response | Both `fetch` and `fetch_by_metadata` return `{ namespace, records: [{id, values?, metadata?}], nextCursor: null }` |
 
 ---
 

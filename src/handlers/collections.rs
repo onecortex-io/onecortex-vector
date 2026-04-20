@@ -5,16 +5,14 @@ use sqlx::Row;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateCollectionRequest {
     pub name: String,
     pub dimension: i32,
     #[serde(default = "default_metric")]
     pub metric: String,
-    /// Onecortex extension -- enables BM25 index on this collection
     pub bm25_enabled: Option<bool>,
-    /// Accepted: "enabled" | "disabled" -- stored in deletion_protected column
-    pub deletion_protection: Option<String>,
-    /// Arbitrary JSON tags
+    pub deletion_protected: Option<bool>,
     pub tags: Option<serde_json::Value>,
 }
 
@@ -23,14 +21,15 @@ fn default_metric() -> String {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ConfigureCollectionRequest {
-    pub deletion_protection: Option<String>,
+    pub deletion_protected: Option<bool>,
     pub tags: Option<serde_json::Value>,
-    #[serde(rename = "bm25Enabled")]
     pub bm25_enabled: Option<bool>,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CollectionResponse {
     pub name: String,
     pub dimension: i32,
@@ -38,36 +37,37 @@ pub struct CollectionResponse {
     pub status: CollectionStatus,
     pub host: String,
     pub vector_type: String,
-    #[serde(rename = "bm25Enabled")]
     pub bm25_enabled: bool,
+    pub deletion_protected: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<serde_json::Value>,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CollectionStatus {
     pub ready: bool,
     pub state: String,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CollectionListResponse {
     pub collections: Vec<CollectionResponse>,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DescribeCollectionStatsResponse {
     pub namespaces: std::collections::HashMap<String, NamespaceSummary>,
     pub dimension: i32,
-    #[serde(rename = "collectionFullness")]
     pub collection_fullness: f64,
-    #[serde(rename = "totalRecordCount")]
     pub total_record_count: i64,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NamespaceSummary {
-    #[serde(rename = "recordCount")]
     pub record_count: i64,
 }
 
@@ -108,7 +108,7 @@ pub async fn create_collection(
 
     let collection_id = Uuid::new_v4();
     let bm25_enabled = req.bm25_enabled.unwrap_or(false);
-    let deletion_protected = req.deletion_protection.as_deref() == Some("enabled");
+    let deletion_protected = req.deletion_protected.unwrap_or(false);
 
     // Insert into catalog -- unique constraint on name gives us 409 on duplicate
     let insert_result = sqlx::query(
@@ -166,6 +166,7 @@ pub async fn create_collection(
             host,
             vector_type: "dense".to_string(),
             bm25_enabled,
+            deletion_protected,
             tags: req.tags,
         }),
     ))
@@ -176,7 +177,7 @@ pub async fn list_collections(
     State(state): State<AppState>,
 ) -> Result<Json<CollectionListResponse>, ApiError> {
     let rows = sqlx::query(
-        "SELECT name, dimension, metric, status, bm25_enabled, tags FROM _onecortex_vector.collections ORDER BY created_at"
+        "SELECT name, dimension, metric, status, bm25_enabled, deletion_protected, tags FROM _onecortex_vector.collections ORDER BY created_at"
     )
     .fetch_all(&state.pool)
     .await?;
@@ -191,6 +192,7 @@ pub async fn list_collections(
             let metric: String = r.get("metric");
             let status_str: String = r.get("status");
             let bm25_enabled: bool = r.get("bm25_enabled");
+            let deletion_protected: bool = r.get("deletion_protected");
             let tags: Option<serde_json::Value> = r.get("tags");
             CollectionResponse {
                 name,
@@ -209,6 +211,7 @@ pub async fn list_collections(
                 host: host.clone(),
                 vector_type: "dense".to_string(),
                 bm25_enabled,
+                deletion_protected,
                 tags,
             }
         })
@@ -223,7 +226,7 @@ pub async fn describe_collection(
     axum::extract::Path(name): axum::extract::Path<String>,
 ) -> Result<Json<CollectionResponse>, ApiError> {
     let row = sqlx::query(
-        "SELECT id, name, dimension, metric, status, bm25_enabled, tags FROM _onecortex_vector.collections WHERE name = $1",
+        "SELECT id, name, dimension, metric, status, bm25_enabled, deletion_protected, tags FROM _onecortex_vector.collections WHERE name = $1",
     )
     .bind(&name)
     .fetch_optional(&state.pool)
@@ -248,6 +251,7 @@ pub async fn describe_collection(
         host,
         vector_type: "dense".to_string(),
         bm25_enabled: row.get("bm25_enabled"),
+        deletion_protected: row.get("deletion_protected"),
         tags: row.get("tags"),
     }))
 }
@@ -297,7 +301,7 @@ pub async fn configure_collection(
     axum::extract::Path(name): axum::extract::Path<String>,
     Json(req): Json<ConfigureCollectionRequest>,
 ) -> Result<Json<CollectionResponse>, ApiError> {
-    let deletion_protected = req.deletion_protection.as_deref().map(|s| s == "enabled");
+    let deletion_protected = req.deletion_protected;
 
     let row = sqlx::query(
         r#"
@@ -349,6 +353,7 @@ pub async fn configure_collection(
         host,
         vector_type: "dense".to_string(),
         bm25_enabled: row.get("bm25_enabled"),
+        deletion_protected: row.get("deletion_protected"),
         tags: row.get("tags"),
     }))
 }
