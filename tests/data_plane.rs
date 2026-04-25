@@ -15,7 +15,6 @@ async fn upsert_and_fetch() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"color": "red"}},
@@ -35,7 +34,6 @@ async fn upsert_and_fetch() {
             "{}/v1/collections/{name}/records/fetch",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "ids": ["v1", "v2"] }))
         .send()
         .await
@@ -67,7 +65,6 @@ async fn upsert_batch_too_large() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "records": records }))
         .send()
         .await
@@ -88,7 +85,6 @@ async fn upsert_dimension_mismatch() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [{"id": "v1", "values": [1.0, 0.0]}]
         }))
@@ -112,7 +108,6 @@ async fn upsert_sparse_values_accepted() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [{
                 "id": "v1",
@@ -140,7 +135,6 @@ async fn fetch_by_metadata_eq() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"category": "news"}},
@@ -156,7 +150,6 @@ async fn fetch_by_metadata_eq() {
             "{}/v1/collections/{name}/records/fetch_by_metadata",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "filter": {"category": {"$eq": "news"}} }))
         .send()
         .await
@@ -181,7 +174,6 @@ async fn fetch_by_metadata_in() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"tag": "a"}},
@@ -198,7 +190,6 @@ async fn fetch_by_metadata_in() {
             "{}/v1/collections/{name}/records/fetch_by_metadata",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "filter": {"tag": {"$in": ["a", "c"]}} }))
         .send()
         .await
@@ -222,7 +213,6 @@ async fn delete_by_ids() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
@@ -239,7 +229,6 @@ async fn delete_by_ids() {
             "{}/v1/collections/{name}/records/delete",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "ids": ["v1"] }))
         .send()
         .await
@@ -251,7 +240,6 @@ async fn delete_by_ids() {
             "{}/v1/collections/{name}/records/fetch",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "ids": ["v1", "v2"] }))
         .send()
         .await
@@ -275,7 +263,6 @@ async fn delete_by_filter() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"keep": "no"}},
@@ -291,7 +278,6 @@ async fn delete_by_filter() {
             "{}/v1/collections/{name}/records/delete",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "filter": {"keep": {"$eq": "no"}} }))
         .send()
         .await
@@ -302,7 +288,6 @@ async fn delete_by_filter() {
             "{}/v1/collections/{name}/records/fetch",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "ids": ["v1", "v2"] }))
         .send()
         .await
@@ -326,7 +311,6 @@ async fn delete_all() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
@@ -342,7 +326,6 @@ async fn delete_all() {
             "{}/v1/collections/{name}/records/delete",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "deleteAll": true }))
         .send()
         .await
@@ -353,7 +336,6 @@ async fn delete_all() {
             "{}/v1/collections/{name}/records/fetch",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "ids": ["v1", "v2"] }))
         .send()
         .await
@@ -376,7 +358,6 @@ async fn update_metadata() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [{"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"a": 1}}]
         }))
@@ -390,7 +371,6 @@ async fn update_metadata() {
             "{}/v1/collections/{name}/records/update",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "id": "v1", "setMetadata": {"b": 2} }))
         .send()
         .await
@@ -403,7 +383,6 @@ async fn update_metadata() {
             "{}/v1/collections/{name}/records/fetch",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "ids": ["v1"] }))
         .send()
         .await
@@ -428,7 +407,6 @@ async fn list_vectors_with_prefix() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "doc-1", "values": [1.0, 0.0, 0.0]},
@@ -445,7 +423,6 @@ async fn list_vectors_with_prefix() {
             "{}/v1/collections/{name}/records/list?prefix=doc-",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .send()
         .await
         .unwrap();
@@ -468,7 +445,6 @@ async fn list_vectors_pagination() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "a", "values": [1.0, 0.0, 0.0]},
@@ -486,7 +462,6 @@ async fn list_vectors_pagination() {
             "{}/v1/collections/{name}/records/list?limit=2",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .send()
         .await
         .unwrap();
@@ -501,7 +476,6 @@ async fn list_vectors_pagination() {
             "{}/v1/collections/{name}/records/list?limit=2&paginationToken={next}",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .send()
         .await
         .unwrap();
@@ -523,7 +497,6 @@ async fn scroll_returns_full_vector_data() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"color": "red"}},
@@ -539,7 +512,6 @@ async fn scroll_returns_full_vector_data() {
             "{}/v1/collections/{name}/records/scroll",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "includeValues": true,
             "includeMetadata": true
@@ -574,7 +546,6 @@ async fn scroll_pagination_with_cursor() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({"records": records}))
         .send()
         .await
@@ -586,7 +557,6 @@ async fn scroll_pagination_with_cursor() {
             "{}/v1/collections/{name}/records/scroll",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({"limit": 2}))
         .send()
         .await
@@ -602,7 +572,6 @@ async fn scroll_pagination_with_cursor() {
             "{}/v1/collections/{name}/records/scroll",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({"limit": 2, "cursor": cursor}))
         .send()
         .await
@@ -617,7 +586,6 @@ async fn scroll_pagination_with_cursor() {
             "{}/v1/collections/{name}/records/scroll",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({"limit": 2, "cursor": cursor}))
         .send()
         .await
@@ -640,7 +608,6 @@ async fn scroll_with_filter() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"status": "active"}},
@@ -657,7 +624,6 @@ async fn scroll_with_filter() {
             "{}/v1/collections/{name}/records/scroll",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "filter": {"status": {"$eq": "active"}},
             "includeMetadata": true
@@ -691,7 +657,6 @@ async fn sample_returns_random_vectors() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({"records": records}))
         .send()
         .await
@@ -699,7 +664,6 @@ async fn sample_returns_random_vectors() {
 
     let resp = client
         .post(format!("{}/v1/collections/{name}/sample", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&json!({"size": 5, "includeMetadata": true}))
         .send()
         .await
@@ -725,7 +689,6 @@ async fn sample_with_filter() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"type": "a"}},
@@ -739,7 +702,6 @@ async fn sample_with_filter() {
 
     let resp = client
         .post(format!("{}/v1/collections/{name}/sample", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "size": 10,
             "filter": {"type": {"$eq": "a"}},
@@ -773,7 +735,6 @@ async fn filter_gte_datetime() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "r1", "values": [1.0, 0.0, 0.0], "metadata": {"created_at": "2025-01-15T00:00:00Z"}},
@@ -789,7 +750,6 @@ async fn filter_gte_datetime() {
             "{}/v1/collections/{name}/records/fetch_by_metadata",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({"filter": {"created_at": {"$gte": "2025-06-01T00:00:00Z"}}}))
         .send()
         .await
@@ -814,7 +774,6 @@ async fn filter_lt_datetime() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "r1", "values": [1.0, 0.0, 0.0], "metadata": {"created_at": "2025-01-15T00:00:00Z"}},
@@ -830,7 +789,6 @@ async fn filter_lt_datetime() {
             "{}/v1/collections/{name}/records/fetch_by_metadata",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({"filter": {"created_at": {"$lt": "2025-06-01T00:00:00Z"}}}))
         .send()
         .await
@@ -856,7 +814,6 @@ async fn filter_geo_radius() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "nyc", "values": [1.0, 0.0, 0.0], "metadata": {"location": {"lat": 40.7128, "lon": -74.0060}}},
@@ -873,7 +830,6 @@ async fn filter_geo_radius() {
             "{}/v1/collections/{name}/records/fetch_by_metadata",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "filter": {
                 "location": {"$geoRadius": {"lat": 40.7128, "lon": -74.0060, "radiusMeters": 1000.0}}
@@ -902,7 +858,6 @@ async fn filter_geo_bbox() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "nyc", "values": [1.0, 0.0, 0.0], "metadata": {"location": {"lat": 40.7128, "lon": -74.0060}}},
@@ -919,7 +874,6 @@ async fn filter_geo_bbox() {
             "{}/v1/collections/{name}/records/fetch_by_metadata",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "filter": {
                 "location": {"$geoBBox": {
@@ -951,7 +905,6 @@ async fn filter_elem_match_hit() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "r1", "values": [1.0, 0.0, 0.0], "metadata": {"tags": [{"type": "premium"}, {"type": "basic"}]}},
@@ -967,7 +920,6 @@ async fn filter_elem_match_hit() {
             "{}/v1/collections/{name}/records/fetch_by_metadata",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({"filter": {"tags": {"$elemMatch": {"type": "premium"}}}}))
         .send()
         .await
@@ -992,7 +944,6 @@ async fn filter_elem_match_no_results() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "r1", "values": [1.0, 0.0, 0.0], "metadata": {"tags": [{"type": "premium"}]}},
@@ -1008,7 +959,6 @@ async fn filter_elem_match_no_results() {
             "{}/v1/collections/{name}/records/fetch_by_metadata",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({"filter": {"tags": {"$elemMatch": {"type": "enterprise"}}}}))
         .send()
         .await

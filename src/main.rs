@@ -1,5 +1,5 @@
 use axum::{
-    routing::{delete, get, post},
+    routing::{get, post},
     Router,
 };
 use std::net::SocketAddr;
@@ -8,7 +8,6 @@ mod config;
 mod db;
 mod error;
 mod handlers;
-mod middleware;
 mod planner;
 mod state;
 
@@ -142,11 +141,6 @@ fn build_public_router(state: state::AppState) -> Router {
             "/v1/aliases/:alias",
             get(aliases::describe_alias).delete(aliases::delete_alias),
         )
-        // Apply auth middleware to all routes
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            middleware::auth::auth_middleware,
-        ))
         .with_state(state)
 }
 
@@ -156,8 +150,6 @@ fn build_admin_router(state: state::AppState) -> Router {
         .route("/metrics", get(health::metrics))
         .route("/admin/collections/:name/reindex", post(admin::reindex))
         .route("/admin/collections/:name/vacuum", post(admin::vacuum))
-        .route("/admin/api_keys", post(admin::create_api_key))
-        .route("/admin/api_keys/:id", delete(admin::revoke_api_key))
         .route("/admin/config", get(admin::dump_config))
         .with_state(state)
 }

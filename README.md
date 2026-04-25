@@ -49,7 +49,33 @@ Developers typically hit five major roadblocks at this stage:
 
 ---
 
-## Quick Start
+## Deployment
+
+Onecortex Vector is designed to run as part of the **Onecortex platform**, which puts an APISIX API gateway in front of the vector service and the auth service. In this configuration:
+
+- Authentication is handled entirely by the gateway using JWTs issued by [onecortex-auth](https://github.com/onecortex-io/onecortex-auth).
+- Clients send `Authorization: Bearer <jwt>` to the gateway; the vector service itself has no auth layer.
+- The vector API is accessible at `http://<host>/vector/v1/...` (port 80 via the gateway).
+
+To bring up the full Onecortex platform:
+
+```bash
+# From the org root (onecortex-io/)
+docker compose up -d
+```
+
+For **standalone local development** (no auth, direct access):
+
+```bash
+# From this directory
+docker compose up -d postgres
+cargo run
+# API available at http://localhost:8080 — no authentication required
+```
+
+---
+
+## Quick Start (Standalone)
 
 ### 1. Start PostgreSQL
 
@@ -71,28 +97,16 @@ The server applies migrations automatically on startup.
 - **Public API:** http://localhost:8080
 - **Admin API:** http://localhost:9090
 
-### 3. Create an API key
+### 3. Create a collection and query records
 
 ```bash
-curl -s -X POST http://localhost:9090/admin/api_keys \
-  -H "Content-Type: application/json" \
-  -d '{"name":"dev-key"}' | jq .
-```
-
-### 4. Create a collection and query records
-
-```bash
-API_KEY="<key-from-step-3>"
-
 # Create a collection
 curl -s -X POST http://localhost:8080/v1/collections \
-  -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"name":"my-collection","dimension":3,"metric":"cosine"}'
 
 # Upsert records
 curl -s -X POST http://localhost:8080/v1/collections/my-collection/records/upsert \
-  -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "records": [
@@ -103,14 +117,11 @@ curl -s -X POST http://localhost:8080/v1/collections/my-collection/records/upser
 
 # Query
 curl -s -X POST http://localhost:8080/v1/collections/my-collection/query \
-  -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"vector":[0.1,0.2,0.3],"topK":5,"includeMetadata":true}'
 ```
 
 ## API Endpoints
-
-All data-plane endpoints require an `Api-Key` header.
 
 ### Control Plane
 
@@ -167,8 +178,6 @@ All data-plane endpoints require an `Api-Key` header.
 | GET | `/ready` | 8080 | Readiness check |
 | GET | `/version` | 8080 | Server version |
 | GET | `/metrics` | 9090 | Prometheus metrics |
-| POST | `/admin/api_keys` | 9090 | Create API key |
-| DELETE | `/admin/api_keys/:id` | 9090 | Revoke API key |
 | POST | `/admin/collections/:name/reindex` | 9090 | Rebuild DiskANN index |
 | POST | `/admin/collections/:name/vacuum` | 9090 | Vacuum a collection |
 | GET | `/admin/config` | 9090 | Dump current config |
@@ -180,13 +189,11 @@ Create a BM25-enabled collection, upsert records with text, and query with both 
 ```bash
 # Create with BM25 enabled
 curl -s -X POST http://localhost:8080/v1/collections \
-  -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"name":"hybrid-col","dimension":3,"metric":"cosine","bm25Enabled":true}'
 
 # Upsert with text for BM25
 curl -s -X POST http://localhost:8080/v1/collections/hybrid-col/records/upsert \
-  -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "records": [
@@ -197,7 +204,6 @@ curl -s -X POST http://localhost:8080/v1/collections/hybrid-col/records/upsert \
 
 # Hybrid query (dense + BM25, fused with RRF)
 curl -s -X POST http://localhost:8080/v1/collections/hybrid-col/query/hybrid \
-  -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"vector":[1,0,0],"text":"machine learning","topK":5}'
 ```
@@ -208,7 +214,6 @@ Add a `rerank` object to any query to rerank results using a natural language qu
 
 ```bash
 curl -s -X POST http://localhost:8080/v1/collections/my-collection/query \
-  -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "vector":[0.1,0.2,0.3],
@@ -250,7 +255,6 @@ Send up to 10 queries in one round-trip; results are returned in the same order:
 
 ```bash
 curl -s -X POST http://localhost:8080/v1/collections/my-collection/query/batch \
-  -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"queries":[{"vector":[1,0,0],"topK":5},{"vector":[0,1,0],"topK":3}]}'
 ```
@@ -269,7 +273,6 @@ Find similar items from example IDs — no query vector needed:
 
 ```bash
 curl -s -X POST http://localhost:8080/v1/collections/my-collection/recommend \
-  -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"positiveIds":["rec-1","rec-2"],"negativeIds":["rec-9"],"topK":10}'
 ```
@@ -317,7 +320,6 @@ Aliases resolve transparently on every endpoint, enabling zero-downtime collecti
 ```bash
 # Point "prod" at a new collection atomically
 curl -s -X POST http://localhost:8080/v1/aliases \
-  -H "Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"alias":"prod","collectionName":"my-collection-v2"}'
 ```
@@ -338,6 +340,8 @@ All environment variables use the `ONECORTEX_VECTOR_` prefix. Copy `.env.example
 
 ## SDKs
 
+When using the Onecortex platform, the SDK connects to the gateway URL and passes the JWT obtained from onecortex-auth:
+
 | Language | Package | Repository |
 |----------|---------|------------|
 | Python | `onecortex` | [onecortex-python-client](https://github.com/onecortex-io/onecortex-python-client) |
@@ -346,7 +350,7 @@ All environment variables use the `ONECORTEX_VECTOR_` prefix. Copy `.env.example
 ```python
 from onecortex import Onecortex
 
-client = Onecortex(url="http://localhost:8080", api_key="your-api-key")
+client = Onecortex(url="http://localhost/vector")
 col = client.vector.collection("my-collection")
 results = await col.query(vector=[0.1, 0.2, 0.3], top_k=5)
 ```
@@ -354,7 +358,7 @@ results = await col.query(vector=[0.1, 0.2, 0.3], top_k=5)
 ```typescript
 import { Onecortex } from '@onecortex/sdk';
 
-const client = new Onecortex({ url: 'http://localhost:8080', apiKey: 'your-api-key' });
+const client = new Onecortex({ url: 'http://localhost/vector' });
 const col = client.vector.collection('my-collection');
 const results = await col.query({ vector: [0.1, 0.2, 0.3], topK: 5 });
 ```
@@ -362,13 +366,13 @@ const results = await col.query({ vector: [0.1, 0.2, 0.3], topK: 5 });
 ## Architecture
 
 ```
-Client → REST API (axum) → PostgreSQL 18
-                              ├── pgvector (vector storage + operators)
-                              ├── pgvectorscale (StreamingDiskANN indexing)
-                              └── pg_textsearch (BM25 full-text search)
+Client → APISIX Gateway (JWT validation) → REST API (axum) → PostgreSQL 18
+                                                                  ├── pgvector (vector storage + operators)
+                                                                  ├── pgvectorscale (StreamingDiskANN indexing)
+                                                                  └── pg_textsearch (BM25 full-text search)
 ```
 
-Two PostgreSQL schemas are used: `_onecortex_vector` holds the system catalog (collections, api_keys, aliases, stats), and `_onecortex` holds user data — one table per collection named `col_<uuid>`. Keeping user data in `_onecortex` allows other Onecortex services on the same PostgreSQL instance to store their own data under the same shared namespace. Migrations are managed by sqlx and applied automatically on server startup.
+Two PostgreSQL schemas are used: `_onecortex_vector` holds the system catalog (collections, aliases, stats), and `_onecortex` holds user data — one table per collection named `col_<uuid>`. Keeping user data in `_onecortex` allows other Onecortex services on the same PostgreSQL instance to store their own data under the same shared namespace. Migrations are managed by sqlx and applied automatically on server startup.
 
 ## Development
 

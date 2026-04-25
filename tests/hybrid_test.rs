@@ -15,7 +15,6 @@ async fn hybrid_query_requires_bm25_enabled() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [0.1, 0.2, 0.3], "text": "the quick brown fox"}
@@ -31,7 +30,6 @@ async fn hybrid_query_requires_bm25_enabled() {
             "{}/v1/collections/{name}/query/hybrid",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [0.1, 0.2, 0.3],
             "text": "fox",
@@ -60,7 +58,6 @@ async fn hybrid_query_returns_results() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0], "text": "the quick brown fox"},
@@ -77,7 +74,6 @@ async fn hybrid_query_returns_results() {
             "{}/v1/collections/{name}/query/hybrid",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
             "text": "quick fox",
@@ -118,7 +114,6 @@ async fn hybrid_query_topk_max_enforced() {
             "{}/v1/collections/{name}/query/hybrid",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [0.1, 0.2, 0.3],
             "text": "fox",
@@ -141,7 +136,6 @@ async fn patch_index_enables_bm25() {
     // Enable BM25 via PATCH
     let resp = client
         .patch(format!("{}/v1/collections/{name}", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "bm25Enabled": true }))
         .send()
         .await
@@ -151,7 +145,6 @@ async fn patch_index_enables_bm25() {
     // Describe should show bm25Enabled: true
     let resp = client
         .get(format!("{}/v1/collections/{name}", server.base_url))
-        .header("Api-Key", &server.api_key)
         .send()
         .await
         .unwrap();

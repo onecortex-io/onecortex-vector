@@ -13,8 +13,6 @@ pub enum ApiError {
     #[error("{0}")]
     AlreadyExists(String),
     #[error("{0}")]
-    Unauthenticated(String),
-    #[error("{0}")]
     PermissionDenied(String),
     #[error("Internal server error")]
     Internal(#[from] anyhow::Error),
@@ -44,9 +42,6 @@ impl IntoResponse for ApiError {
             }
             ApiError::NotFound(msg) => (StatusCode::NOT_FOUND, "NOT_FOUND", msg.clone()),
             ApiError::AlreadyExists(msg) => (StatusCode::CONFLICT, "ALREADY_EXISTS", msg.clone()),
-            ApiError::Unauthenticated(msg) => {
-                (StatusCode::UNAUTHORIZED, "UNAUTHENTICATED", msg.clone())
-            }
             ApiError::PermissionDenied(msg) => {
                 (StatusCode::FORBIDDEN, "PERMISSION_DENIED", msg.clone())
             }

@@ -2,10 +2,9 @@
 pub struct TestServer {
     pub base_url: String,
     pub pool: sqlx::PgPool,
-    pub api_key: String,
 }
 
-/// Start a test server on a random port with a seeded API key.
+/// Start a test server on a random port.
 pub async fn start_test_server() -> TestServer {
     dotenvy::dotenv().ok();
     let mut config = onecortex_vector::config::AppConfig::from_env().unwrap();
@@ -16,9 +15,6 @@ pub async fn start_test_server() -> TestServer {
         .await
         .unwrap();
 
-    // Seed test API key
-    let api_key = onecortex_vector::middleware::auth::seed_test_key(&pool).await;
-
     let reranker = onecortex_vector::planner::reranker::build_reranker(&config);
     let state = onecortex_vector::state::AppState {
         pool: pool.clone(),
@@ -26,7 +22,6 @@ pub async fn start_test_server() -> TestServer {
         reranker,
     };
 
-    // Build public router
     let router = build_test_router(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -39,7 +34,6 @@ pub async fn start_test_server() -> TestServer {
     TestServer {
         base_url: format!("http://{addr}"),
         pool,
-        api_key,
     }
 }
 
@@ -128,10 +122,6 @@ fn build_test_router(state: onecortex_vector::state::AppState) -> axum::Router {
             "/v1/aliases/:alias",
             get(aliases::describe_alias).delete(aliases::delete_alias),
         )
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            onecortex_vector::middleware::auth::auth_middleware,
-        ))
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
         .with_state(state)
 }
@@ -144,7 +134,6 @@ pub async fn create_test_index(server: &TestServer, dimension: i32, metric: &str
     let client = reqwest::Client::new();
     let resp = client
         .post(format!("{}/v1/collections", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&serde_json::json!({
             "name": name,
             "dimension": dimension,
@@ -174,7 +163,6 @@ pub async fn create_test_index_with_bm25(
     let client = reqwest::Client::new();
     let resp = client
         .post(format!("{}/v1/collections", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&serde_json::json!({
             "name": name,
             "dimension": dimension,
@@ -198,7 +186,6 @@ pub async fn cleanup_index(server: &TestServer, name: &str) {
     let client = reqwest::Client::new();
     let _ = client
         .delete(format!("{}/v1/collections/{}", server.base_url, name))
-        .header("Api-Key", &server.api_key)
         .send()
         .await;
 }

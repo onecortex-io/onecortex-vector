@@ -16,7 +16,6 @@ async fn facets_basic_counts() {
             "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "r1", "values": [1.0, 0.0, 0.0], "metadata": {"category": "Electronics"}},
@@ -35,7 +34,6 @@ async fn facets_basic_counts() {
             "{}/v1/collections/{collection}/facets",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({"field": "category"}))
         .send()
         .await
@@ -67,7 +65,6 @@ async fn facets_with_filter() {
             "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "r1", "values": [1.0, 0.0, 0.0], "metadata": {"category": "Electronics", "in_stock": "true"}},
@@ -86,7 +83,6 @@ async fn facets_with_filter() {
             "{}/v1/collections/{collection}/facets",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "field": "category",
             "filter": {"in_stock": {"$eq": "true"}}
@@ -118,7 +114,6 @@ async fn facets_excludes_records_missing_field() {
             "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "r1", "values": [1.0, 0.0, 0.0], "metadata": {"category": "Electronics"}},
@@ -135,7 +130,6 @@ async fn facets_excludes_records_missing_field() {
             "{}/v1/collections/{collection}/facets",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({"field": "category"}))
         .send()
         .await
@@ -175,7 +169,6 @@ async fn facets_respects_limit() {
             "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({"records": records}))
         .send()
         .await
@@ -186,7 +179,6 @@ async fn facets_respects_limit() {
             "{}/v1/collections/{collection}/facets",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({"field": "category", "limit": 3}))
         .send()
         .await
@@ -210,7 +202,6 @@ async fn facets_empty_collection_returns_empty() {
             "{}/v1/collections/{collection}/facets",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({"field": "category"}))
         .send()
         .await
@@ -235,7 +226,6 @@ async fn facets_invalid_field_name_returns_400() {
                 "{}/v1/collections/{collection}/facets",
                 server.base_url
             ))
-            .header("Api-Key", &server.api_key)
             .json(&json!({"field": bad_field}))
             .send()
             .await
@@ -257,7 +247,6 @@ async fn facets_limit_out_of_range_returns_400() {
             "{}/v1/collections/{collection}/facets",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({"field": "category", "limit": 101}))
         .send()
         .await
@@ -278,7 +267,6 @@ async fn query_cosine() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
@@ -292,7 +280,6 @@ async fn query_cosine() {
 
     let resp = client
         .post(format!("{}/v1/collections/{name}/query", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
             "topK": 3,
@@ -329,7 +316,6 @@ async fn query_euclidean() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
@@ -342,7 +328,6 @@ async fn query_euclidean() {
 
     let resp = client
         .post(format!("{}/v1/collections/{name}/query", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
             "topK": 2,
@@ -381,7 +366,6 @@ async fn query_dotproduct() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
@@ -394,7 +378,6 @@ async fn query_dotproduct() {
 
     let resp = client
         .post(format!("{}/v1/collections/{name}/query", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
             "topK": 2,
@@ -432,7 +415,6 @@ async fn query_with_metadata_filter() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0], "metadata": {"category": "news"}},
@@ -446,7 +428,6 @@ async fn query_with_metadata_filter() {
 
     let resp = client
         .post(format!("{}/v1/collections/{name}/query", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
             "topK": 10,
@@ -476,7 +457,6 @@ async fn query_top_k_too_large() {
 
     let resp = client
         .post(format!("{}/v1/collections/{name}/query", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
             "topK": 10001,
@@ -500,7 +480,6 @@ async fn query_by_id() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
@@ -513,7 +492,6 @@ async fn query_by_id() {
 
     let resp = client
         .post(format!("{}/v1/collections/{name}/query", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "id": "v1",
             "topK": 2,
@@ -544,7 +522,6 @@ async fn query_namespace_isolation() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "namespace": "ns1",
             "records": [{"id": "v1", "values": [1.0, 0.0, 0.0]}]
@@ -559,7 +536,6 @@ async fn query_namespace_isolation() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "namespace": "ns2",
             "records": [{"id": "v2", "values": [0.0, 1.0, 0.0]}]
@@ -571,7 +547,6 @@ async fn query_namespace_isolation() {
     // Query ns1 -- should only get v1
     let resp = client
         .post(format!("{}/v1/collections/{name}/query", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
             "topK": 10,
@@ -588,7 +563,6 @@ async fn query_namespace_isolation() {
     // Query ns2 -- should only get v2
     let resp = client
         .post(format!("{}/v1/collections/{name}/query", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
             "topK": 10,
@@ -617,7 +591,6 @@ async fn query_score_threshold_filters_low_scores() {
             "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
@@ -634,7 +607,6 @@ async fn query_score_threshold_filters_low_scores() {
             "{}/v1/collections/{collection}/query",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
             "topK": 10,
@@ -664,7 +636,6 @@ async fn query_score_threshold_zero_returns_all() {
             "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
@@ -680,7 +651,6 @@ async fn query_score_threshold_zero_returns_all() {
             "{}/v1/collections/{collection}/query",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
             "topK": 10,
@@ -708,7 +678,6 @@ async fn query_score_threshold_out_of_range_returns_400() {
             "{}/v1/collections/{collection}/query",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
             "topK": 10,
@@ -734,7 +703,6 @@ async fn batch_query_returns_multiple_results() {
             "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
@@ -751,7 +719,6 @@ async fn batch_query_returns_multiple_results() {
             "{}/v1/collections/{collection}/query/batch",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "queries": [
                 {"vector": [1.0, 0.0, 0.0], "topK": 2},
@@ -787,7 +754,6 @@ async fn batch_query_empty_returns_400() {
             "{}/v1/collections/{collection}/query/batch",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({"queries": []}))
         .send()
         .await
@@ -813,7 +779,6 @@ async fn batch_query_exceeds_limit_returns_400() {
             "{}/v1/collections/{collection}/query/batch",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({"queries": queries}))
         .send()
         .await
@@ -835,7 +800,6 @@ async fn query_group_by_metadata_field() {
             "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "n1-c1", "values": [0.9, 0.1, 0.0], "metadata": {"doc": "news-1"}},
@@ -854,7 +818,6 @@ async fn query_group_by_metadata_field() {
             "{}/v1/collections/{collection}/query",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
             "topK": 10,
@@ -905,7 +868,6 @@ async fn query_group_by_caps_per_group() {
             "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({"records": records}))
         .send()
         .await
@@ -916,7 +878,6 @@ async fn query_group_by_caps_per_group() {
             "{}/v1/collections/{collection}/query",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "vector": [1.0, 0.0, 0.0],
             "topK": 10,
@@ -949,7 +910,6 @@ async fn query_without_group_by_returns_flat_matches() {
             "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [{"id": "v1", "values": [1.0, 0.0, 0.0]}]
         }))
@@ -962,7 +922,6 @@ async fn query_without_group_by_returns_flat_matches() {
             "{}/v1/collections/{collection}/query",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({"vector": [1.0, 0.0, 0.0], "topK": 1}))
         .send()
         .await
@@ -990,7 +949,6 @@ async fn recommend_basic() {
             "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
@@ -1008,7 +966,6 @@ async fn recommend_basic() {
             "{}/v1/collections/{collection}/recommend",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "positiveIds": ["v1"],
             "topK": 3
@@ -1039,7 +996,6 @@ async fn recommend_with_negatives() {
             "{}/v1/collections/{collection}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
@@ -1058,7 +1014,6 @@ async fn recommend_with_negatives() {
             "{}/v1/collections/{collection}/recommend",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "positiveIds": ["v1"],
             "negativeIds": ["v3"],
@@ -1089,7 +1044,6 @@ async fn recommend_empty_positives_returns_400() {
             "{}/v1/collections/{collection}/recommend",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "positiveIds": [],
             "topK": 5
@@ -1114,7 +1068,6 @@ async fn recommend_nonexistent_positive_returns_404() {
             "{}/v1/collections/{collection}/recommend",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "positiveIds": ["nonexistent"],
             "topK": 5

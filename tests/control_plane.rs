@@ -3,10 +3,6 @@ mod common;
 use reqwest::Client;
 use serde_json::json;
 
-fn client_with_key(api_key: &str) -> (Client, String) {
-    (Client::new(), api_key.to_string())
-}
-
 #[tokio::test]
 async fn create_index_success() {
     let server = common::start_test_server().await;
@@ -18,7 +14,6 @@ async fn create_index_success() {
 
     let resp = client
         .post(format!("{}/v1/collections", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "name": name, "dimension": 3, "metric": "cosine" }))
         .send()
         .await
@@ -42,7 +37,6 @@ async fn create_index_duplicate() {
 
     let resp = client
         .post(format!("{}/v1/collections", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "name": name, "dimension": 3, "metric": "cosine" }))
         .send()
         .await
@@ -62,7 +56,6 @@ async fn create_index_bad_dimension() {
 
     let resp = client
         .post(format!("{}/v1/collections", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "name": "bad-dim-test", "dimension": 0, "metric": "cosine" }))
         .send()
         .await
@@ -80,7 +73,6 @@ async fn create_index_bad_dimension_too_large() {
 
     let resp = client
         .post(format!("{}/v1/collections", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "name": "bad-dim-large", "dimension": 20001, "metric": "cosine" }))
         .send()
         .await
@@ -96,7 +88,6 @@ async fn create_index_bad_metric() {
 
     let resp = client
         .post(format!("{}/v1/collections", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "name": "bad-metric", "dimension": 3, "metric": "hamming" }))
         .send()
         .await
@@ -113,7 +104,6 @@ async fn list_indexes() {
 
     let resp = client
         .get(format!("{}/v1/collections", server.base_url))
-        .header("Api-Key", &server.api_key)
         .send()
         .await
         .unwrap();
@@ -134,7 +124,6 @@ async fn describe_index() {
 
     let resp = client
         .get(format!("{}/v1/collections/{name}", server.base_url))
-        .header("Api-Key", &server.api_key)
         .send()
         .await
         .unwrap();
@@ -158,7 +147,6 @@ async fn describe_index_not_found() {
             "{}/v1/collections/nonexistent-index",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .send()
         .await
         .unwrap();
@@ -174,7 +162,6 @@ async fn delete_index() {
 
     let resp = client
         .delete(format!("{}/v1/collections/{name}", server.base_url))
-        .header("Api-Key", &server.api_key)
         .send()
         .await
         .unwrap();
@@ -183,7 +170,6 @@ async fn delete_index() {
     // Subsequent GET should return 404
     let resp = client
         .get(format!("{}/v1/collections/{name}", server.base_url))
-        .header("Api-Key", &server.api_key)
         .send()
         .await
         .unwrap();
@@ -198,7 +184,6 @@ async fn configure_index() {
 
     let resp = client
         .patch(format!("{}/v1/collections/{name}", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "deletionProtected": true }))
         .send()
         .await
@@ -223,7 +208,6 @@ async fn deletion_protection_blocks_delete() {
     // Enable deletion protection
     client
         .patch(format!("{}/v1/collections/{name}", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "deletionProtected": true }))
         .send()
         .await
@@ -232,7 +216,6 @@ async fn deletion_protection_blocks_delete() {
     // Try to delete -- should get 403
     let resp = client
         .delete(format!("{}/v1/collections/{name}", server.base_url))
-        .header("Api-Key", &server.api_key)
         .send()
         .await
         .unwrap();
@@ -243,7 +226,6 @@ async fn deletion_protection_blocks_delete() {
     // Disable protection and cleanup
     client
         .patch(format!("{}/v1/collections/{name}", server.base_url))
-        .header("Api-Key", &server.api_key)
         .json(&json!({ "deletionProtected": false }))
         .send()
         .await
@@ -263,7 +245,6 @@ async fn describe_index_stats() {
             "{}/v1/collections/{name}/records/upsert",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({
             "records": [
                 {"id": "v1", "values": [1.0, 0.0, 0.0]},
@@ -282,7 +263,6 @@ async fn describe_index_stats() {
             "{}/v1/collections/{name}/describe_collection_stats",
             server.base_url
         ))
-        .header("Api-Key", &server.api_key)
         .json(&json!({}))
         .send()
         .await
