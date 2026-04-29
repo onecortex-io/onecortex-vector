@@ -22,7 +22,7 @@ pub async fn start_test_server() -> TestServer {
         reranker,
     };
 
-    let router = build_test_router(state);
+    let router = onecortex_vector::with_observability(build_test_router(state));
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

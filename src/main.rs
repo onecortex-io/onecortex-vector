@@ -4,12 +4,9 @@ use axum::{
 };
 use std::net::SocketAddr;
 
-mod config;
-mod db;
-mod error;
-mod handlers;
-mod planner;
-mod state;
+// The library crate (src/lib.rs) is the canonical home for these modules.
+// The binary re-uses them via the `onecortex_vector` crate name.
+use onecortex_vector::{config, db, handlers, planner, state, with_observability};
 
 #[tokio::main]
 async fn main() {
@@ -35,10 +32,10 @@ async fn main() {
     };
 
     // Public API router -- all endpoints except /metrics
-    let public_router = build_public_router(state.clone());
+    let public_router = with_observability(build_public_router(state.clone()));
 
     // Admin router -- metrics + admin endpoints, internal port only
-    let admin_router = build_admin_router(state.clone());
+    let admin_router = with_observability(build_admin_router(state.clone()));
 
     let public_addr: SocketAddr = format!("0.0.0.0:{}", config.api_port).parse().unwrap();
     let admin_addr: SocketAddr = format!("0.0.0.0:{}", config.admin_port).parse().unwrap();
