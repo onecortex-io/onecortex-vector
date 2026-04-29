@@ -50,11 +50,7 @@ pub async fn resolve_collection(
     .bind(name)
     .fetch_optional(pool)
     .await?
-    .ok_or_else(|| {
-        ApiError::not_found(format!(
-            "Collection '{name}' does not exist or is not ready."
-        ))
-    })?;
+    .ok_or_else(|| ApiError::collection_not_found(name))?;
 
     Ok(CollectionMeta {
         id: alias_row.get("id"),
@@ -293,8 +289,7 @@ pub async fn fetch_by_metadata(
     let limit = req.limit.unwrap_or(100).min(1000);
 
     let (filter_sql, filter_params) =
-        crate::planner::filter_translator::translate_filter(&req.filter, 1)
-            .map_err(|e| ApiError::invalid_argument(e.to_string()))?;
+        crate::planner::filter_translator::translate_filter(&req.filter, 1)?;
 
     let include_values = req.include_values.unwrap_or(false);
     let values_col = if include_values {
@@ -384,8 +379,7 @@ pub async fn delete_records(
         .await?;
     } else if let Some(filter) = &req.filter {
         let (filter_sql, filter_params) =
-            crate::planner::filter_translator::translate_filter(filter, 1)
-                .map_err(|e| ApiError::invalid_argument(e.to_string()))?;
+            crate::planner::filter_translator::translate_filter(filter, 1)?;
         let sql = format!("DELETE FROM {table} WHERE namespace = $1 AND ({filter_sql})");
         let mut q = sqlx::query(&sql).bind(&namespace);
         for p in &filter_params {
@@ -590,8 +584,7 @@ pub async fn scroll_records(
     };
 
     let (filter_sql, filter_params) = if let Some(f) = &req.filter {
-        crate::planner::filter_translator::translate_filter(f, 2)
-            .map_err(|e| ApiError::invalid_argument(e.to_string()))?
+        crate::planner::filter_translator::translate_filter(f, 2)?
     } else {
         ("TRUE".to_string(), vec![])
     };
@@ -700,8 +693,7 @@ pub async fn sample_records(
     };
 
     let (filter_sql, filter_params) = if let Some(f) = &req.filter {
-        crate::planner::filter_translator::translate_filter(f, 1)
-            .map_err(|e| ApiError::invalid_argument(e.to_string()))?
+        crate::planner::filter_translator::translate_filter(f, 1)?
     } else {
         ("TRUE".to_string(), vec![])
     };

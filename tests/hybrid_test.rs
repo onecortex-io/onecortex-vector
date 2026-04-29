@@ -41,7 +41,7 @@ async fn hybrid_query_requires_bm25_enabled() {
     assert_eq!(resp.status(), 400);
 
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["error"]["code"], "INVALID_ARGUMENT");
+    assert_eq!(body["error"]["code"], "HYBRID_REQUIRES_BM25");
 
     common::cleanup_index(&server, &name).await;
 }

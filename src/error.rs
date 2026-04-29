@@ -90,6 +90,16 @@ pub enum ApiError {
     Database(#[from] sqlx::Error),
 }
 
+impl From<crate::planner::filter_translator::FilterError> for ApiError {
+    fn from(err: crate::planner::filter_translator::FilterError) -> Self {
+        use crate::planner::filter_translator::FilterError;
+        match err {
+            FilterError::Malformed(msg) => ApiError::filter_malformed(msg),
+            FilterError::UnsupportedOperator(op) => ApiError::filter_unsupported_operator(op),
+        }
+    }
+}
+
 impl ApiError {
     /// Generic 400 with a free-form message. Prefer typed builders (added in a
     /// later commit) over this one.
@@ -157,7 +167,6 @@ impl ApiError {
         }
     }
 
-    #[allow(dead_code)]
     pub fn filter_malformed(msg: impl Into<String>) -> Self {
         let message = msg.into();
         ApiError::BadRequest {
@@ -167,7 +176,6 @@ impl ApiError {
         }
     }
 
-    #[allow(dead_code)]
     pub fn filter_unsupported_operator(op: impl Into<String>) -> Self {
         let op = op.into();
         ApiError::BadRequest {
@@ -177,7 +185,6 @@ impl ApiError {
         }
     }
 
-    #[allow(dead_code)]
     pub fn hybrid_requires_bm25(collection: &str) -> Self {
         ApiError::BadRequest {
             code: ErrorCode::HybridRequiresBm25,
@@ -200,7 +207,6 @@ impl ApiError {
         }
     }
 
-    #[allow(dead_code)]
     pub fn facet_field_invalid(field: &str, reason: &str) -> Self {
         ApiError::BadRequest {
             code: ErrorCode::FacetFieldInvalid,
@@ -220,7 +226,6 @@ impl ApiError {
         }
     }
 
-    #[allow(dead_code)]
     pub fn collection_not_found(name: &str) -> Self {
         ApiError::NotFound {
             code: ErrorCode::CollectionNotFound,
@@ -229,7 +234,6 @@ impl ApiError {
         }
     }
 
-    #[allow(dead_code)]
     pub fn collection_already_exists(name: &str) -> Self {
         ApiError::Conflict {
             code: ErrorCode::CollectionAlreadyExists,

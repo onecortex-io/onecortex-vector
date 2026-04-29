@@ -44,7 +44,7 @@ async fn create_index_duplicate() {
 
     assert_eq!(resp.status(), 409);
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["error"]["code"], "ALREADY_EXISTS");
+    assert_eq!(body["error"]["code"], "COLLECTION_ALREADY_EXISTS");
 
     common::cleanup_index(&server, &name).await;
 }

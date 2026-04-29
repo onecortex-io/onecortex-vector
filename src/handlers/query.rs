@@ -183,8 +183,7 @@ pub async fn query_vectors(
 
     // Build filter clause
     let (filter_sql, filter_params) = if let Some(f) = &req.filter {
-        crate::planner::filter_translator::translate_filter(f, 3)
-            .map_err(|e| ApiError::invalid_argument(e.to_string()))?
+        crate::planner::filter_translator::translate_filter(f, 3)?
     } else {
         ("TRUE".to_string(), vec![])
     };
@@ -416,11 +415,7 @@ pub async fn query_hybrid(
         crate::handlers::records::resolve_collection(&state.pool, &collection_name).await?;
 
     if !collection.bm25_enabled {
-        return Err(ApiError::invalid_argument(
-            "Hybrid search requires bm25_enabled=true on this collection. \
-             Use PATCH /collections/:name to enable it."
-                .to_string(),
-        ));
+        return Err(ApiError::hybrid_requires_bm25(&collection_name));
     }
 
     let mut result = crate::planner::hybrid::hybrid_query(
@@ -555,8 +550,7 @@ async fn execute_ann_query(
     };
 
     let (filter_sql, filter_params) = if let Some(f) = filter {
-        crate::planner::filter_translator::translate_filter(f, 3)
-            .map_err(|e| ApiError::invalid_argument(e.to_string()))?
+        crate::planner::filter_translator::translate_filter(f, 3)?
     } else {
         ("TRUE".to_string(), vec![])
     };
@@ -661,8 +655,9 @@ pub async fn facets(
 ) -> Result<Json<FacetsResponse>, ApiError> {
     // Validate field name — it is embedded directly in SQL (JSONB operators cannot be parameterized)
     if req.field.is_empty() || req.field.len() > 100 {
-        return Err(ApiError::invalid_argument(
-            "field must be between 1 and 100 characters".to_string(),
+        return Err(ApiError::facet_field_invalid(
+            &req.field,
+            "must be between 1 and 100 characters",
         ));
     }
     let valid = {
@@ -674,8 +669,9 @@ pub async fn facets(
         first_ok && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
     };
     if !valid {
-        return Err(ApiError::invalid_argument(
-            "field must start with a letter or underscore and contain only letters, digits, underscores, or dots".to_string(),
+        return Err(ApiError::facet_field_invalid(
+            &req.field,
+            "must start with a letter or underscore and contain only letters, digits, underscores, or dots",
         ));
     }
     if req.limit < 1 || req.limit > 100 {
@@ -693,8 +689,7 @@ pub async fn facets(
     let field_accessor = crate::planner::filter_translator::jsonb_field_accessor(&req.field);
 
     let (filter_sql, filter_params) = if let Some(f) = &req.filter {
-        crate::planner::filter_translator::translate_filter(f, 1)
-            .map_err(|e| ApiError::invalid_argument(e.to_string()))?
+        crate::planner::filter_translator::translate_filter(f, 1)?
     } else {
         ("TRUE".to_string(), vec![])
     };

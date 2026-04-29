@@ -130,10 +130,7 @@ pub async fn create_collection(
 
     match insert_result {
         Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
-            return Err(ApiError::already_exists(format!(
-                "Collection '{}' already exists.",
-                req.name
-            )));
+            return Err(ApiError::collection_already_exists(&req.name));
         }
         Err(e) => return Err(ApiError::Database(e)),
         Ok(_) => {}
