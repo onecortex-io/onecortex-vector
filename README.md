@@ -1,394 +1,177 @@
 # Onecortex Vector
 
-High-performance hybrid vector database built in Rust 🦀. Simple API with hybrid search (Combining Dense vector, Full-text, Geo radius) including rich metadata filtering, namespace support, and advanced retrieval/search features.
+> **A modern, high-performance hybrid vector database built on PostgreSQL in Rust.**
+
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.2.0-green.svg)](CHANGELOG.md)
+[![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org)
+[![Docs](https://img.shields.io/badge/docs-api%20reference-informational)](docs/api-reference.md)
+
+The full retrieval stack production RAG actually needs — dense ANN,
+BM25, reranking, geo filtering, and a rich metadata DSL — without the
+operational tax of a separate distributed system to run alongside your
+primary database.
 
 ---
 
-## The Problem
-
-Building AI applications with Retreival Augmented Generation (RAG) pipelines, Semantic search or Recommendation engines is quite simple in a demo but it is surprisingly difficult in production at scale.
-
-Developers typically hit five major roadblocks at this stage:
-
-- **Search Precision Failures:** Pure vector search is great at semantic meaning but it fails at exact details match. For instace, it struggles to distinguish between similar identifiers (like `invoice #123456` vs. `invoice #123457`) and misses rare technical terms. This leads to LLM hallucinations and inaccurate outputs in RAG setups.
-
-- **Architectural Complexity:** High quality retrieval needs "Hybrid Search," which usually means bolting together separate vector and full-text search systems. Managing this merge logic and re-ranking layers transforms a simple query into a complex distributed pipeline in AI application backends.
-
-- **Fragmented Infrastructure:**
-    * **Managed Services:** Managed services like Pinecone and Qdrant leads to high costs and proprietary vendor lock-in. Plus another third-party data store which can raise compliance, data privacy, and GDPR concerns.
-    * **Self-Hosted Engines:** Like Milvus and Weaviate require orchestrating heavy, stateful components like etcd and message queues. Qdrant is open source but it forces you to manage complex stack outside your primary database infrastructure.
-
-- **Unpredictable Scaling:** Combining scalar / metadata filters with hybrid vector search is a major bottleneck. Most systems suffer from unpredictable latency and degraded recall as datasets grow from thousands to millions of documents.
-
-- **Consistency & Maintenance:** Most vector databases struggle with continuous updates and data shifts. Upgrading embedding models or handling real-time inserts often leads to silent precision drops with no easy way to roll back in Production.
-
-**The result** of all this is that AI Engineering teams spend more time managing retrieval infrastructure than building actual products.
-
-**Onecortex Vector** is built to change that: a self-hosted hybrid vector database built on familiar **PostgreSQL** to handle the full retrieval stack - dense vector search, hybrid BM25 fusion, geo radius search, re-ranking, and rich filtering without the overhead of a distributed system to run at scale.
-
----
-
-## Features
-
-- **Dense ANN search:** *cosine, euclidean, and dot product similarity search using StreamingDiskANN within pgvectorscale.*
-- **Hybrid search:** *combine dense vector search with BM25 text search and geo radius search using Reciprocal Rank Fusion (RRF)*
-- **Re-ranking:** *using Cohere, Voyage, Jina, Pinecone Inference, or a self-hosted cross-encoder to rerank results*
-- **Metadata filtering:** *rich query DSL with `$eq`, `$ne`, `$gt`, `$lt`, `$in`, `$nin`, `$and`, `$or` operators*
-- **Geo filtering:** *filter records by geographic proximity (`$geoRadius`) or bounding box (`$geoBBox`) using coordinates stored in metadata*
-- **Datetime filtering:** *native ISO 8601 datetime comparisons using the standard `$gt`, `$gte`, `$lt`, `$lte` operators*
-- **Array element matching:** *`$elemMatch` filters records where at least one element in a metadata array field matches a sub-filter object*
-- **Namespaces:** *isolate data within a collection using scoped operations by namespace*
-- **Batch queries:** *fan out up to 10 queries in a single request with concurrent execution*
-- **Scroll & sample:** *paginate over all records or draw a random sample, both with full filter support*
-- **Score threshold:** *filter results by minimum similarity score - applied after reranking results*
-- **Group by:** *group nearest-neighbor results by any metadata field to avoid same-source clustering*
-- **Faceted counts:** *aggregate counts of distinct metadata values for any field, optionally scoped to a filter*
-- **Recommendations API:** *find similar items from positive/negative example IDs without supplying a query vector*
-- **Collection aliases:** *point a named alias at any collection for zero-downtime swaps and A/B testing before releases*
-- **Self-hosted:** *uses PostgreSQL database as its backend, no vendor lock-in*
-
----
-
-## Deployment
-
-Onecortex Vector is designed to run as part of the **Onecortex platform**, which puts an APISIX API gateway in front of the vector service and the auth service. In this configuration:
-
-- Authentication is handled entirely by the gateway using JWTs issued by [onecortex-auth](https://github.com/onecortex-io/onecortex-auth).
-- Clients send `Authorization: Bearer <jwt>` to the gateway; the vector service itself has no auth layer.
-- The vector API is accessible at `http://<host>/vector/v1/...` (port 80 via the gateway).
-
-To bring up the full Onecortex platform:
-
-```bash
-# From the org root (onecortex-io/)
-docker compose up -d
-```
-
-For **standalone local development** (no auth, direct access):
-
-```bash
-# From this directory
-docker compose up -d postgres
-cargo run
-# API available at http://localhost:8080 — no authentication required
-```
-
----
-
-## Quick Start (Standalone)
-
-### 1. Start PostgreSQL
+## Quickstart
 
 ```bash
 docker compose up -d postgres
-```
+cargo run                                              # listens on :8080
 
-This starts PostgreSQL 18 with pgvector, pgvectorscale, and pg_textsearch pre-installed.
+curl -X POST localhost:8080/v1/collections \
+  -d '{"name":"docs","dimension":3,"metric":"cosine"}'
 
-### 2. Start the API server
+curl -X POST localhost:8080/v1/collections/docs/records/upsert \
+  -d '{"records":[{"id":"r1","values":[0.1,0.2,0.3],"metadata":{"genre":"sci-fi"}}]}'
 
-```bash
-cp .env.example .env
-cargo run
-```
-
-The server applies migrations automatically on startup.
-
-- **Public API:** http://localhost:8080
-- **Admin API:** http://localhost:9090
-
-### 3. Create a collection and query records
-
-```bash
-# Create a collection
-curl -s -X POST http://localhost:8080/v1/collections \
-  -H "Content-Type: application/json" \
-  -d '{"name":"my-collection","dimension":3,"metric":"cosine"}'
-
-# Upsert records
-curl -s -X POST http://localhost:8080/v1/collections/my-collection/records/upsert \
-  -H "Content-Type: application/json" \
-  -d '{
-    "records": [
-      {"id":"rec-1","values":[0.1,0.2,0.3],"metadata":{"genre":"sci-fi"}},
-      {"id":"rec-2","values":[0.4,0.5,0.6],"metadata":{"genre":"fantasy"}}
-    ]
-  }'
-
-# Query
-curl -s -X POST http://localhost:8080/v1/collections/my-collection/query \
-  -H "Content-Type: application/json" \
+curl -X POST localhost:8080/v1/collections/docs/query \
   -d '{"vector":[0.1,0.2,0.3],"topK":5,"includeMetadata":true}'
 ```
 
-## API Endpoints
+That's the whole loop. No cluster bootstrap, no etcd, no message
+queue, no proprietary index format on disk.
 
-### Control Plane
+## Why
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/v1/collections` | Create a collection |
-| GET | `/v1/collections` | List all collections |
-| GET | `/v1/collections/:name` | Describe a collection |
-| PATCH | `/v1/collections/:name` | Configure a collection (tags, bm25) |
-| DELETE | `/v1/collections/:name` | Delete a collection |
-| POST | `/v1/collections/:name/describe_collection_stats` | Get collection statistics |
+**Built on Postgres.** A thin REST API on top of `pgvector`,
+`pgvectorscale`, and `pg_textsearch`. Your embeddings live in the same
+database as the rest of your application data. Your existing backups,
+IAM, monitoring, and migrations keep working.
 
-### Data Plane
+**Hybrid out of the box.** Dense ANN, BM25 keyword, geo radius, and
+reranking — fused with reciprocal rank fusion in a single endpoint.
+No glue code, no second system to operate.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/v1/collections/:name/records/upsert` | Upsert records |
-| POST | `/v1/collections/:name/records/fetch` | Fetch records by ID |
-| POST | `/v1/collections/:name/records/fetch_by_metadata` | Fetch records by metadata filter |
-| POST | `/v1/collections/:name/records/delete` | Delete records |
-| POST | `/v1/collections/:name/records/update` | Update a record's metadata |
-| GET | `/v1/collections/:name/records/list` | List record IDs (IDs only) |
-| POST | `/v1/collections/:name/records/scroll` | Scroll all records with cursor pagination |
-| POST | `/v1/collections/:name/sample` | Random sample of records |
-| POST | `/v1/collections/:name/query` | Query nearest neighbors |
-| POST | `/v1/collections/:name/query/hybrid` | Hybrid dense + BM25 query |
-| POST | `/v1/collections/:name/query/batch` | Run up to 10 queries concurrently |
-| POST | `/v1/collections/:name/recommend` | Recommend by positive/negative example IDs |
-| POST | `/v1/collections/:name/facets` | Aggregated counts of distinct metadata values |
+**One container to operate.** No distributed-system tax. Run it on
+your laptop, behind your gateway, or as part of the
+[Onecortex platform](https://github.com/onecortex-io). Same binary.
 
-### Namespaces
+For the full take and trade-offs, see
+[Why Onecortex Vector](docs/why-onecortex-vector.md).
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/v1/collections/:name/namespaces` | List namespaces |
-| POST | `/v1/collections/:name/namespaces` | Create a namespace |
-| GET | `/v1/collections/:name/namespaces/:ns` | Describe a namespace |
-| DELETE | `/v1/collections/:name/namespaces/:ns` | Delete a namespace |
+## Compared to
 
-### Aliases
+|                          | Onecortex Vector | Pinecone | Qdrant / Weaviate / Milvus | Bare pgvector |
+|--------------------------|:---:|:---:|:---:|:---:|
+| Self-hosted              | ✓ | — | ✓ | ✓ |
+| Hybrid search built-in   | ✓ | add-on | ✓ | DIY |
+| Reranking built-in       | ✓ (Cohere/Voyage/Jina/Pinecone/local) | DIY | add-on | DIY |
+| Geo filtering            | ✓ | DIY | ✓ | DIY |
+| Operational footprint    | one Postgres | managed SaaS | cluster + state | one Postgres |
+| Vendor lock-in           | none | yes | none | none |
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/v1/aliases` | Create or update an alias |
-| GET | `/v1/aliases` | List all aliases |
-| GET | `/v1/aliases/:alias` | Describe an alias |
-| DELETE | `/v1/aliases/:alias` | Delete an alias |
+## Features
 
-### Health & Admin
+- **Dense ANN** — cosine, Euclidean, dot product via StreamingDiskANN.
+- **Hybrid search** — dense + BM25 + geo radius, fused with RRF.
+- **Reranking** — Cohere, Voyage, Jina, Pinecone Inference, or a
+  self-hosted cross-encoder. One env var to switch.
+- **Filtering DSL** — `$eq`/`$ne`/`$gt`/`$lt`/`$in`/`$nin`/`$and`/`$or`,
+  ISO 8601 datetimes, `$geoRadius`, `$geoBBox`, `$elemMatch`.
+- **Namespaces** — scoped operations inside a collection for
+  multi-tenant data isolation.
+- **Aliases** — atomic, zero-downtime collection swaps for A/B
+  testing and reindex flips.
+- **Batch & scroll** — fan out 10 queries in one call, cursor through
+  millions of records, draw random samples.
+- **Group by, score threshold, faceted counts, recommendations** — all
+  the retrieval primitives RAG pipelines actually use.
+- **Stable error taxonomy** — typed codes, structured `details`, and
+  an `X-Request-Id` on every response so a paste of an error gives an
+  operator something to grep.
 
-| Method | Path | Port | Description |
-|--------|------|------|-------------|
-| GET | `/health` | 8080 | Health check |
-| GET | `/ready` | 8080 | Readiness check |
-| GET | `/version` | 8080 | Server version |
-| GET | `/metrics` | 9090 | Prometheus metrics |
-| POST | `/admin/collections/:name/reindex` | 9090 | Rebuild DiskANN index |
-| POST | `/admin/collections/:name/vacuum` | 9090 | Vacuum a collection |
-| GET | `/admin/config` | 9090 | Dump current config |
+## Install
 
-## Hybrid Search
-
-Create a BM25-enabled collection, upsert records with text, and query with both vector and keyword:
+**Docker:**
 
 ```bash
-# Create with BM25 enabled
-curl -s -X POST http://localhost:8080/v1/collections \
-  -H "Content-Type: application/json" \
-  -d '{"name":"hybrid-col","dimension":3,"metric":"cosine","bm25Enabled":true}'
-
-# Upsert with text for BM25
-curl -s -X POST http://localhost:8080/v1/collections/hybrid-col/records/upsert \
-  -H "Content-Type: application/json" \
-  -d '{
-    "records": [
-      {"id":"r1","values":[1,0,0],"text":"machine learning basics"},
-      {"id":"r2","values":[0,1,0],"text":"cooking recipes"}
-    ]
-  }'
-
-# Hybrid query (dense + BM25, fused with RRF)
-curl -s -X POST http://localhost:8080/v1/collections/hybrid-col/query/hybrid \
-  -H "Content-Type: application/json" \
-  -d '{"vector":[1,0,0],"text":"machine learning","topK":5}'
+docker pull ghcr.io/onecortex-io/onecortex-vector:latest
 ```
 
-## Reranking
-
-Add a `rerank` object to any query to rerank results using a natural language query:
+**From source (Rust 1.75+):**
 
 ```bash
-curl -s -X POST http://localhost:8080/v1/collections/my-collection/query \
-  -H "Content-Type: application/json" \
-  -d '{
-    "vector":[0.1,0.2,0.3],
-    "topK":10,
-    "rerank":{"query":"machine learning fundamentals","topN":3,"rankField":"text"}
-  }'
+cargo install --git https://github.com/onecortex-io/onecortex-vector
 ```
 
-Supported reranking backends (All Optional and configured via `ONECORTEX_VECTOR_RERANK_BACKEND`):
-
-| Backend | Value | Notes |
-|---------|-------|-------|
-| None | `none` | Default, no reranking |
-| Cohere | `cohere` | Requires `ONECORTEX_VECTOR_RERANK_COHERE_API_KEY` |
-| Voyage AI | `voyage` | Requires `ONECORTEX_VECTOR_RERANK_VOYAGE_API_KEY` |
-| Jina AI | `jina` | Requires `ONECORTEX_VECTOR_RERANK_JINA_API_KEY` |
-| Pinecone Inference | `pinecone` | Requires `ONECORTEX_VECTOR_RERANK_PINECONE_API_KEY` |
-| Self-hosted cross-encoder | `cross-encoder` | Requires `ONECORTEX_VECTOR_RERANK_CROSS_ENCODER_URL` |
-
-To start the optional self-hosted cross-encoder:
+**Local development:**
 
 ```bash
-docker compose --profile reranking up -d
+git clone https://github.com/onecortex-io/onecortex-vector
+cd onecortex-vector
+docker compose up -d postgres
+cargo run
 ```
 
-## Advanced Query Features
+Migrations apply automatically on startup. The server listens on
+`:8080` (public) and `:9090` (admin / Prometheus metrics).
 
-### Score Threshold
+## Docs
 
-Drop results below a minimum similarity score (applied after reranking):
-
-```json
-{ "vector": [...], "topK": 10, "scoreThreshold": 0.75 }
-```
-
-### Batch Query
-
-Send up to 10 queries in one round-trip; results are returned in the same order:
-
-```bash
-curl -s -X POST http://localhost:8080/v1/collections/my-collection/query/batch \
-  -H "Content-Type: application/json" \
-  -d '{"queries":[{"vector":[1,0,0],"topK":5},{"vector":[0,1,0],"topK":3}]}'
-```
-
-### GroupBy
-
-Group results by a metadata field to ensure diversity across sources:
-
-```json
-{ "vector": [...], "topK": 50, "groupBy": { "field": "document_id", "limit": 5, "groupSize": 2 } }
-```
-
-### Recommendations
-
-Find similar items from example IDs — no query vector needed:
-
-```bash
-curl -s -X POST http://localhost:8080/v1/collections/my-collection/recommend \
-  -H "Content-Type: application/json" \
-  -d '{"positiveIds":["rec-1","rec-2"],"negativeIds":["rec-9"],"topK":10}'
-```
-
-### Faceted Counts
-
-Get aggregated counts of distinct metadata values for a field, ordered by count. Supports the same filter DSL as queries and an optional `namespace`:
-
-```json
-{ "field": "category", "filter": { "in_stock": { "$eq": "true" } }, "limit": 20 }
-```
-
-Records missing the field are excluded. Maximum `limit` is 100 (default 20).
-
-### Advanced Metadata Filtering
-
-**Datetime ranges** — use ISO 8601 strings with `$gt`/`$gte`/`$lt`/`$lte`; no epoch-integer conversion needed:
-
-```json
-{ "filter": { "created_at": { "$gte": "2025-01-01T00:00:00Z" } } }
-```
-
-**Geo radius** — filter records within a distance from a lat/lon point (requires a `location` field with `lat`/`lon` sub-keys):
-
-```json
-{ "filter": { "location": { "$geoRadius": { "lat": 40.7, "lon": -74.0, "radiusMeters": 5000 } } } }
-```
-
-**Geo bounding box:**
-
-```json
-{ "filter": { "location": { "$geoBBox": { "minLat": 40.0, "maxLat": 41.5, "minLon": -75.0, "maxLon": -73.0 } } } }
-```
-
-**Array element matching** — filter records where a metadata array contains at least one element matching a condition:
-
-```json
-{ "filter": { "tags": { "$elemMatch": { "type": "premium" } } } }
-```
-
-### Collection Aliases
-
-Aliases resolve transparently on every endpoint, enabling zero-downtime collection swaps:
-
-```bash
-# Point "prod" at a new collection atomically
-curl -s -X POST http://localhost:8080/v1/aliases \
-  -H "Content-Type: application/json" \
-  -d '{"alias":"prod","collectionName":"my-collection-v2"}'
-```
-
-## Configuration
-
-All environment variables use the `ONECORTEX_VECTOR_` prefix. Copy `.env.example` for the full list with documentation.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DATABASE_URL` | (required) | PostgreSQL connection string |
-| `API_PORT` | `8080` | Public API port |
-| `ADMIN_PORT` | `9090` | Admin/metrics port |
-| `MAX_CONNS` | `50` | Max database pool connections |
-| `LOG_LEVEL` | `info` | Log level (trace/debug/info/warn/error) |
-| `RERANK_BACKEND` | `none` | Reranking backend |
-| `ENABLE_RLS` | `false` | Enable row-level security for namespace isolation |
+- **[API reference](docs/api-reference.md)** — every endpoint, every parameter
+- **[Filters](docs/filters.md)** — the metadata DSL with examples
+- **[Reranking](docs/reranking.md)** — pick a backend, configure it
+- **[Errors & request ids](docs/api-reference/errors.md)** — full code table and retry guidance
+- **[Configuration](docs/configuration.md)** — environment variables
+- **[Deployment](docs/deployment.md)** — standalone, behind a gateway, or on the Onecortex platform
+- **[Architecture](docs/architecture.md)** — what's running where
+- **[Why Onecortex Vector](docs/why-onecortex-vector.md)** — the long version
 
 ## SDKs
 
-When using the Onecortex platform, the SDK connects to the gateway URL and passes the JWT obtained from onecortex-auth:
-
 | Language | Package | Repository |
 |----------|---------|------------|
-| Python | `onecortex` | [onecortex-python-client](https://github.com/onecortex-io/onecortex-python-client) |
-| TypeScript | `@onecortex/sdk` | [onecortex-typescript-client](https://github.com/onecortex-io/onecortex-typescript-client) |
+| Python | [`onecortex`](https://pypi.org/project/onecortex/) | [onecortex-python-client](https://github.com/onecortex-io/onecortex-python-client) |
+| TypeScript | [`@onecortex/sdk`](https://www.npmjs.com/package/@onecortex/sdk) | [onecortex-typescript-client](https://github.com/onecortex-io/onecortex-typescript-client) |
 
 ```python
 from onecortex import Onecortex
-
-client = Onecortex(url="http://localhost/vector")
-col = client.vector.collection("my-collection")
-results = await col.query(vector=[0.1, 0.2, 0.3], top_k=5)
+client = Onecortex(url="http://localhost:8080")
+results = await client.vector.collection("docs").query(
+    vector=[0.1, 0.2, 0.3], top_k=5
+)
 ```
 
 ```typescript
 import { Onecortex } from '@onecortex/sdk';
-
-const client = new Onecortex({ url: 'http://localhost/vector' });
-const col = client.vector.collection('my-collection');
-const results = await col.query({ vector: [0.1, 0.2, 0.3], topK: 5 });
+const client = new Onecortex({ url: 'http://localhost:8080' });
+const results = await client.vector.collection('docs').query({
+  vector: [0.1, 0.2, 0.3], topK: 5,
+});
 ```
 
-## Architecture
+## What's next
 
-```
-Client → APISIX Gateway (JWT validation) → REST API (axum) → PostgreSQL 18
-                                                                  ├── pgvector (vector storage + operators)
-                                                                  ├── pgvectorscale (StreamingDiskANN indexing)
-                                                                  └── pg_textsearch (BM25 full-text search)
-```
+Highlights from the next few releases:
 
-Two PostgreSQL schemas are used: `_onecortex_vector` holds the system catalog (collections, aliases, stats), and `_onecortex` holds user data — one table per collection named `col_<uuid>`. Keeping user data in `_onecortex` allows other Onecortex services on the same PostgreSQL instance to store their own data under the same shared namespace. Migrations are managed by sqlx and applied automatically on server startup.
+- Server-side embeddings (`embedder` on the collection) and an
+  `/ingest` endpoint that handles chunking + embedding for you.
+- A `search(text=...)` cross-mode query that picks dense / hybrid /
+  rerank by query plan.
+- A `/_playground` web UI for quick exploration.
+- An `EXPLAIN`-style endpoint that returns the underlying SQL plan
+  and selectivity estimates.
 
-## Development
+Watch the [CHANGELOG](CHANGELOG.md) for what shipped, and open an
+issue if there's something you'd like prioritised.
+
+## Contributing
+
+Issues and PRs welcome. Quick orientation:
 
 ```bash
-# Build
-cargo build
-
-# Run tests (requires PostgreSQL)
-docker compose up -d postgres
-cargo test
-
-# Lint
-cargo fmt --all -- --check
+docker compose up -d postgres   # tests need Postgres
+cargo test                      # 127 tests, mostly integration
 cargo clippy -- -D warnings
+cargo fmt --all -- --check
 ```
+
+Look for issues tagged
+[`good-first-issue`](https://github.com/onecortex-io/onecortex-vector/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22)
+for a low-friction starting point.
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE) for details.
+Apache License 2.0 — see [LICENSE](LICENSE).

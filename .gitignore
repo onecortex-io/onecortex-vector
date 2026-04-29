@@ -16,5 +16,20 @@ target
 .claude/
 .DS_Store
 .env
-docs/
+# Internal design notes, roadmaps, and analysis live under docs/ and are
+# not published. Public-facing docs that the README links to are carved
+# out below. Note: gitignore can't re-include files inside an excluded
+# directory, so we ignore docs/* and docs/api-reference/* (not docs/
+# itself) and negate the specific public files.
+docs/*
+docs/api-reference/*
+!docs/api-reference.md
+!docs/architecture.md
+!docs/configuration.md
+!docs/deployment.md
+!docs/filters.md
+!docs/reranking.md
+!docs/why-onecortex-vector.md
+!docs/api-reference/
+!docs/api-reference/errors.md
 __pycache__
