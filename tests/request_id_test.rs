@@ -22,6 +22,33 @@ async fn health_response_carries_request_id_header() {
 }
 
 #[tokio::test]
+async fn error_body_carries_matching_request_id() {
+    let server = start_test_server().await;
+    let resp = reqwest::get(format!(
+        "{}/v1/collections/does-not-exist-xyz",
+        server.base_url
+    ))
+    .await
+    .unwrap();
+
+    assert_eq!(resp.status(), 404);
+    let header_id = resp
+        .headers()
+        .get("x-request-id")
+        .expect("X-Request-Id missing on error response")
+        .to_str()
+        .unwrap()
+        .to_string();
+
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let body_id = body
+        .pointer("/error/details/requestId")
+        .and_then(|v| v.as_str())
+        .expect("error.details.requestId missing on error body");
+    assert_eq!(body_id, header_id);
+}
+
+#[tokio::test]
 async fn client_supplied_request_id_is_echoed() {
     let server = start_test_server().await;
     let client = reqwest::Client::new();

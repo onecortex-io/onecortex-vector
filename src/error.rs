@@ -255,7 +255,7 @@ struct ErrorDetail {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let (status, code, message, details) = match self {
+        let (status, code, message, mut details) = match self {
             ApiError::BadRequest {
                 code,
                 message,
@@ -295,6 +295,20 @@ impl IntoResponse for ApiError {
                 )
             }
         };
+
+        // Inject the request id (set by `RequestIdTaskLocalLayer`) into
+        // `details.requestId` so SDKs and operators can correlate against
+        // server logs. Returns `None` outside a request scope, in which
+        // case the field is simply omitted.
+        if let Some(request_id) = crate::middleware::request_id::current() {
+            let entry = details.get_or_insert_with(|| serde_json::json!({}));
+            if let Some(obj) = entry.as_object_mut() {
+                obj.insert(
+                    "requestId".to_string(),
+                    serde_json::Value::String(request_id),
+                );
+            }
+        }
 
         let body = ErrorBody {
             status: status.as_u16(),
