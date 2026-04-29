@@ -80,7 +80,7 @@ fn validate_collection_name(name: &str) -> Result<(), ApiError> {
         && !name.starts_with('-')
         && !name.ends_with('-');
     if !valid {
-        return Err(ApiError::InvalidArgument(
+        return Err(ApiError::invalid_argument(
             "collection name must be 1-45 characters, lowercase alphanumeric and hyphens, \
              not starting or ending with a hyphen"
                 .to_string(),
@@ -96,12 +96,12 @@ pub async fn create_collection(
 ) -> Result<(axum::http::StatusCode, Json<CollectionResponse>), ApiError> {
     validate_collection_name(&req.name)?;
     if req.dimension < 1 || req.dimension > 20_000 {
-        return Err(ApiError::InvalidArgument(
+        return Err(ApiError::invalid_argument(
             "dimension must be between 1 and 20000".to_string(),
         ));
     }
     if !["cosine", "euclidean", "dotproduct"].contains(&req.metric.as_str()) {
-        return Err(ApiError::InvalidArgument(
+        return Err(ApiError::invalid_argument(
             "metric must be one of: cosine, euclidean, dotproduct".to_string(),
         ));
     }
@@ -130,7 +130,7 @@ pub async fn create_collection(
 
     match insert_result {
         Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
-            return Err(ApiError::AlreadyExists(format!(
+            return Err(ApiError::already_exists(format!(
                 "Collection '{}' already exists.",
                 req.name
             )));
@@ -231,7 +231,7 @@ pub async fn describe_collection(
     .bind(&name)
     .fetch_optional(&state.pool)
     .await?
-    .ok_or_else(|| ApiError::NotFound(format!("Collection '{name}' does not exist.")))?;
+    .ok_or_else(|| ApiError::not_found(format!("Collection '{name}' does not exist.")))?;
 
     let host = format!("{}:{}", state.config.api_host, state.config.api_port);
     let status_str: String = row.get("status");
@@ -267,11 +267,11 @@ pub async fn delete_collection(
     .bind(&name)
     .fetch_optional(&state.pool)
     .await?
-    .ok_or_else(|| ApiError::NotFound(format!("Collection '{name}' does not exist.")))?;
+    .ok_or_else(|| ApiError::not_found(format!("Collection '{name}' does not exist.")))?;
 
     let deletion_protected: bool = row.get("deletion_protected");
     if deletion_protected {
-        return Err(ApiError::PermissionDenied(format!(
+        return Err(ApiError::permission_denied(format!(
             "Collection '{name}' has deletion protection enabled. Disable it before deleting."
         )));
     }
@@ -321,7 +321,7 @@ pub async fn configure_collection(
     .bind(req.bm25_enabled)
     .fetch_optional(&state.pool)
     .await?
-    .ok_or_else(|| ApiError::NotFound(format!("Collection '{name}' does not exist.")))?;
+    .ok_or_else(|| ApiError::not_found(format!("Collection '{name}' does not exist.")))?;
 
     // If bm25_enabled was toggled, build or drop the BM25 index in the background.
     if let Some(bm25) = req.bm25_enabled {
@@ -369,7 +369,7 @@ pub async fn describe_collection_stats(
             .bind(&name)
             .fetch_optional(&state.pool)
             .await?
-            .ok_or_else(|| ApiError::NotFound(format!("Collection '{name}' does not exist.")))?;
+            .ok_or_else(|| ApiError::not_found(format!("Collection '{name}' does not exist.")))?;
 
     let collection_id: Uuid = collection.get("id");
     let dimension: i32 = collection.get("dimension");

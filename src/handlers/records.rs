@@ -51,7 +51,7 @@ pub async fn resolve_collection(
     .fetch_optional(pool)
     .await?
     .ok_or_else(|| {
-        ApiError::NotFound(format!(
+        ApiError::not_found(format!(
             "Collection '{name}' does not exist or is not ready."
         ))
     })?;
@@ -96,7 +96,7 @@ pub async fn upsert_records(
     Json(req): Json<UpsertRequest>,
 ) -> Result<Json<UpsertResponse>, ApiError> {
     if req.records.len() > 1000 {
-        return Err(ApiError::InvalidArgument(
+        return Err(ApiError::invalid_argument(
             "upsert batch cannot exceed 1000 records".to_string(),
         ));
     }
@@ -110,13 +110,13 @@ pub async fn upsert_records(
     // Validate all IDs and dimensions before any DB writes
     for r in &req.records {
         if r.id.len() > 512 {
-            return Err(ApiError::InvalidArgument(format!(
+            return Err(ApiError::invalid_argument(format!(
                 "record id '{}...' exceeds 512 character limit",
                 &r.id[..20.min(r.id.len())]
             )));
         }
         if r.values.len() != collection.dimension as usize {
-            return Err(ApiError::InvalidArgument(format!(
+            return Err(ApiError::invalid_argument(format!(
                 "record '{}' has {} dimensions but collection expects {}",
                 r.id,
                 r.values.len(),
@@ -232,7 +232,7 @@ pub async fn fetch_records(
     Json(req): Json<FetchRequest>,
 ) -> Result<Json<FetchResponse>, ApiError> {
     if req.ids.len() > 1000 {
-        return Err(ApiError::InvalidArgument(
+        return Err(ApiError::invalid_argument(
             "ids array cannot exceed 1000 entries".to_string(),
         ));
     }
@@ -294,7 +294,7 @@ pub async fn fetch_by_metadata(
 
     let (filter_sql, filter_params) =
         crate::planner::filter_translator::translate_filter(&req.filter, 1)
-            .map_err(|e| ApiError::InvalidArgument(e.to_string()))?;
+            .map_err(|e| ApiError::invalid_argument(e.to_string()))?;
 
     let include_values = req.include_values.unwrap_or(false);
     let values_col = if include_values {
@@ -371,7 +371,7 @@ pub async fn delete_records(
             .await?;
     } else if let Some(ids) = &req.ids {
         if ids.len() > 1000 {
-            return Err(ApiError::InvalidArgument(
+            return Err(ApiError::invalid_argument(
                 "ids array cannot exceed 1000 entries".to_string(),
             ));
         }
@@ -385,7 +385,7 @@ pub async fn delete_records(
     } else if let Some(filter) = &req.filter {
         let (filter_sql, filter_params) =
             crate::planner::filter_translator::translate_filter(filter, 1)
-                .map_err(|e| ApiError::InvalidArgument(e.to_string()))?;
+                .map_err(|e| ApiError::invalid_argument(e.to_string()))?;
         let sql = format!("DELETE FROM {table} WHERE namespace = $1 AND ({filter_sql})");
         let mut q = sqlx::query(&sql).bind(&namespace);
         for p in &filter_params {
@@ -396,7 +396,7 @@ pub async fn delete_records(
         }
         q.execute(&state.pool).await?;
     } else {
-        return Err(ApiError::InvalidArgument(
+        return Err(ApiError::invalid_argument(
             "Provide ids, filter, or deleteAll=true".to_string(),
         ));
     }
@@ -457,7 +457,7 @@ pub async fn update_record(
     .await?;
 
     if result.is_none() {
-        return Err(ApiError::NotFound(format!(
+        return Err(ApiError::not_found(format!(
             "Record '{}' not found in namespace '{}'.",
             req.id, namespace
         )));
@@ -591,7 +591,7 @@ pub async fn scroll_records(
 
     let (filter_sql, filter_params) = if let Some(f) = &req.filter {
         crate::planner::filter_translator::translate_filter(f, 2)
-            .map_err(|e| ApiError::InvalidArgument(e.to_string()))?
+            .map_err(|e| ApiError::invalid_argument(e.to_string()))?
     } else {
         ("TRUE".to_string(), vec![])
     };
@@ -701,7 +701,7 @@ pub async fn sample_records(
 
     let (filter_sql, filter_params) = if let Some(f) = &req.filter {
         crate::planner::filter_translator::translate_filter(f, 1)
-            .map_err(|e| ApiError::InvalidArgument(e.to_string()))?
+            .map_err(|e| ApiError::invalid_argument(e.to_string()))?
     } else {
         ("TRUE".to_string(), vec![])
     };

@@ -28,7 +28,7 @@ pub async fn create_alias(
     Json(req): Json<CreateAliasRequest>,
 ) -> Result<(axum::http::StatusCode, Json<AliasResponse>), ApiError> {
     if req.alias.is_empty() || req.alias.len() > 45 {
-        return Err(ApiError::InvalidArgument(
+        return Err(ApiError::invalid_argument(
             "alias must be 1-45 characters".to_string(),
         ));
     }
@@ -92,7 +92,7 @@ pub async fn describe_alias(
     .bind(&alias)
     .fetch_optional(&state.pool)
     .await?
-    .ok_or_else(|| ApiError::NotFound(format!("Alias '{alias}' does not exist.")))?;
+    .ok_or_else(|| ApiError::not_found(format!("Alias '{alias}' does not exist.")))?;
 
     Ok(Json(AliasResponse {
         alias: row.get("alias"),
@@ -111,7 +111,7 @@ pub async fn delete_alias(
         .await?;
 
     if result.rows_affected() == 0 {
-        return Err(ApiError::NotFound(format!(
+        return Err(ApiError::not_found(format!(
             "Alias '{alias}' does not exist."
         )));
     }

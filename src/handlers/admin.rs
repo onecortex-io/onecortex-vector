@@ -6,7 +6,7 @@ pub async fn reindex(
     State(_state): State<AppState>,
     axum::extract::Path(_name): axum::extract::Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    Err(ApiError::InvalidArgument(
+    Err(ApiError::invalid_argument(
         "Reindex is not yet implemented.".to_string(),
     ))
 }
@@ -16,7 +16,7 @@ pub async fn vacuum(
     State(_state): State<AppState>,
     axum::extract::Path(_name): axum::extract::Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    Err(ApiError::InvalidArgument(
+    Err(ApiError::invalid_argument(
         "Vacuum is not yet implemented.".to_string(),
     ))
 }
@@ -25,7 +25,7 @@ pub async fn vacuum(
 pub async fn dump_config(
     State(_state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    Err(ApiError::InvalidArgument(
+    Err(ApiError::invalid_argument(
         "Config dump is not yet implemented.".to_string(),
     ))
 }

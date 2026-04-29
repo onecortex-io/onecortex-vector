@@ -110,30 +110,30 @@ pub async fn query_vectors(
     Json(req): Json<QueryRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     if req.top_k < 1 || req.top_k > 10_000 {
-        return Err(ApiError::InvalidArgument(
+        return Err(ApiError::invalid_argument(
             "topK must be between 1 and 10000".to_string(),
         ));
     }
     if let Some(threshold) = req.score_threshold {
         if !(0.0..=1.0).contains(&threshold) {
-            return Err(ApiError::InvalidArgument(
+            return Err(ApiError::invalid_argument(
                 "scoreThreshold must be between 0.0 and 1.0".to_string(),
             ));
         }
     }
     if let Some(ref group_opts) = req.group_by {
         if group_opts.field.is_empty() {
-            return Err(ApiError::InvalidArgument(
+            return Err(ApiError::invalid_argument(
                 "groupBy.field must not be empty".to_string(),
             ));
         }
         if group_opts.limit == 0 || group_opts.limit > 100 {
-            return Err(ApiError::InvalidArgument(
+            return Err(ApiError::invalid_argument(
                 "groupBy.limit must be between 1 and 100".to_string(),
             ));
         }
         if group_opts.group_size == 0 || group_opts.group_size > 100 {
-            return Err(ApiError::InvalidArgument(
+            return Err(ApiError::invalid_argument(
                 "groupBy.groupSize must be between 1 and 100".to_string(),
             ));
         }
@@ -155,10 +155,10 @@ pub async fn query_vectors(
         .bind(&namespace)
         .fetch_optional(&state.pool)
         .await?
-        .ok_or_else(|| ApiError::NotFound(format!("Record '{id}' not found.")))?;
+        .ok_or_else(|| ApiError::not_found(format!("Record '{id}' not found.")))?;
         crate::handlers::records::parse_pgvector_str(&row.get::<String, _>("values"))
     } else {
-        return Err(ApiError::InvalidArgument(
+        return Err(ApiError::invalid_argument(
             "Provide either 'vector' or 'id'".to_string(),
         ));
     };
@@ -184,7 +184,7 @@ pub async fn query_vectors(
     // Build filter clause
     let (filter_sql, filter_params) = if let Some(f) = &req.filter {
         crate::planner::filter_translator::translate_filter(f, 3)
-            .map_err(|e| ApiError::InvalidArgument(e.to_string()))?
+            .map_err(|e| ApiError::invalid_argument(e.to_string()))?
     } else {
         ("TRUE".to_string(), vec![])
     };
@@ -400,13 +400,13 @@ pub async fn query_hybrid(
     Json(req): Json<crate::planner::hybrid::HybridQueryRequest>,
 ) -> Result<Json<crate::planner::hybrid::HybridQueryResponse>, ApiError> {
     if req.top_k < 1 || req.top_k > 10_000 {
-        return Err(ApiError::InvalidArgument(
+        return Err(ApiError::invalid_argument(
             "topK must be between 1 and 10000".to_string(),
         ));
     }
     if let Some(threshold) = req.score_threshold {
         if !(0.0..=1.0).contains(&threshold) {
-            return Err(ApiError::InvalidArgument(
+            return Err(ApiError::invalid_argument(
                 "scoreThreshold must be between 0.0 and 1.0".to_string(),
             ));
         }
@@ -416,7 +416,7 @@ pub async fn query_hybrid(
         crate::handlers::records::resolve_collection(&state.pool, &collection_name).await?;
 
     if !collection.bm25_enabled {
-        return Err(ApiError::InvalidArgument(
+        return Err(ApiError::invalid_argument(
             "Hybrid search requires bm25_enabled=true on this collection. \
              Use PATCH /collections/:name to enable it."
                 .to_string(),
@@ -494,12 +494,12 @@ pub async fn query_batch(
     Json(req): Json<BatchQueryRequest>,
 ) -> Result<Json<BatchQueryResponse>, ApiError> {
     if req.queries.is_empty() {
-        return Err(ApiError::InvalidArgument(
+        return Err(ApiError::invalid_argument(
             "queries array must not be empty".to_string(),
         ));
     }
     if req.queries.len() > 10 {
-        return Err(ApiError::InvalidArgument(
+        return Err(ApiError::invalid_argument(
             "queries array cannot exceed 10 entries".to_string(),
         ));
     }
@@ -556,7 +556,7 @@ async fn execute_ann_query(
 
     let (filter_sql, filter_params) = if let Some(f) = filter {
         crate::planner::filter_translator::translate_filter(f, 3)
-            .map_err(|e| ApiError::InvalidArgument(e.to_string()))?
+            .map_err(|e| ApiError::invalid_argument(e.to_string()))?
     } else {
         ("TRUE".to_string(), vec![])
     };
@@ -661,7 +661,7 @@ pub async fn facets(
 ) -> Result<Json<FacetsResponse>, ApiError> {
     // Validate field name — it is embedded directly in SQL (JSONB operators cannot be parameterized)
     if req.field.is_empty() || req.field.len() > 100 {
-        return Err(ApiError::InvalidArgument(
+        return Err(ApiError::invalid_argument(
             "field must be between 1 and 100 characters".to_string(),
         ));
     }
@@ -674,12 +674,12 @@ pub async fn facets(
         first_ok && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
     };
     if !valid {
-        return Err(ApiError::InvalidArgument(
+        return Err(ApiError::invalid_argument(
             "field must start with a letter or underscore and contain only letters, digits, underscores, or dots".to_string(),
         ));
     }
     if req.limit < 1 || req.limit > 100 {
-        return Err(ApiError::InvalidArgument(
+        return Err(ApiError::invalid_argument(
             "limit must be between 1 and 100".to_string(),
         ));
     }
@@ -694,7 +694,7 @@ pub async fn facets(
 
     let (filter_sql, filter_params) = if let Some(f) = &req.filter {
         crate::planner::filter_translator::translate_filter(f, 1)
-            .map_err(|e| ApiError::InvalidArgument(e.to_string()))?
+            .map_err(|e| ApiError::invalid_argument(e.to_string()))?
     } else {
         ("TRUE".to_string(), vec![])
     };
@@ -770,17 +770,17 @@ pub async fn recommend(
     Json(req): Json<RecommendRequest>,
 ) -> Result<Json<RecommendResponse>, ApiError> {
     if req.positive_ids.is_empty() {
-        return Err(ApiError::InvalidArgument(
+        return Err(ApiError::invalid_argument(
             "positiveIds must contain at least one ID".to_string(),
         ));
     }
     if req.positive_ids.len() + req.negative_ids.len() > 100 {
-        return Err(ApiError::InvalidArgument(
+        return Err(ApiError::invalid_argument(
             "Total positive + negative IDs cannot exceed 100".to_string(),
         ));
     }
     if req.top_k < 1 || req.top_k > 10_000 {
-        return Err(ApiError::InvalidArgument(
+        return Err(ApiError::invalid_argument(
             "topK must be between 1 and 10000".to_string(),
         ));
     }
@@ -820,7 +820,7 @@ pub async fn recommend(
     // Verify all positive IDs were found
     for pid in &req.positive_ids {
         if !vec_map.contains_key(pid) {
-            return Err(ApiError::NotFound(format!(
+            return Err(ApiError::not_found(format!(
                 "Positive record '{pid}' not found in namespace '{namespace}'."
             )));
         }

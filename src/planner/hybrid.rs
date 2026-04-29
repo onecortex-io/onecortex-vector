@@ -77,7 +77,7 @@ pub async fn hybrid_query(
     // Filter params start at $6 (param_offset=5).
     let (filter_sql, filter_params) = if let Some(f) = &req.filter {
         translate_filter(f, 5)
-            .map_err(|e| crate::error::ApiError::InvalidArgument(e.to_string()))?
+            .map_err(|e| crate::error::ApiError::invalid_argument(e.to_string()))?
     } else {
         ("TRUE".to_string(), vec![])
     };

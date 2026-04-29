@@ -73,7 +73,7 @@ pub async fn describe_namespace(
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| {
-        ApiError::NotFound(format!(
+        ApiError::not_found(format!(
             "Namespace '{ns}' not found in collection '{collection_name}'."
         ))
     })?;
