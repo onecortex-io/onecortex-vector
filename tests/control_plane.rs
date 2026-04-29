@@ -275,3 +275,37 @@ async fn describe_index_stats() {
 
     common::cleanup_index(&server, &name).await;
 }
+
+#[tokio::test]
+async fn query_against_non_ready_collection_returns_index_not_ready() {
+    let server = common::start_test_server().await;
+    let name = common::create_test_index(&server, 3, "cosine").await;
+
+    // Force the collection into a non-ready state via direct SQL.
+    sqlx::query("UPDATE _onecortex_vector.collections SET status = 'initializing' WHERE name = $1")
+        .bind(&name)
+        .execute(&server.pool)
+        .await
+        .unwrap();
+
+    let client = Client::new();
+    let resp = client
+        .post(format!("{}/v1/collections/{name}/query", server.base_url))
+        .json(&json!({"vector": [1.0, 0.0, 0.0], "topK": 5}))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 409);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "INDEX_NOT_READY");
+    assert_eq!(body["error"]["details"]["status"], "initializing");
+
+    // Restore so cleanup_index can drop it.
+    sqlx::query("UPDATE _onecortex_vector.collections SET status = 'ready' WHERE name = $1")
+        .bind(&name)
+        .execute(&server.pool)
+        .await
+        .unwrap();
+    common::cleanup_index(&server, &name).await;
+}

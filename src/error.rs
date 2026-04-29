@@ -6,9 +6,6 @@ use axum::{
 
 /// Stable, machine-readable error codes returned in the `error.code` field of
 /// every error body. SDKs build typed exception hierarchies on top of these.
-// A few variants are wired only in tests at the time of writing; allow
-// dead_code so the bin target compiles cleanly before those wirings land.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub enum ErrorCode {
     InvalidArgument,
@@ -195,9 +192,6 @@ impl ApiError {
         }
     }
 
-    // The typed builders below are wired into call sites in later commits.
-    // Allow dead_code in the interim so the bin target compiles cleanly.
-    #[allow(dead_code)]
     pub fn dimension_mismatch(record_id: Option<&str>, expected: usize, got: usize) -> Self {
         let message = match record_id {
             Some(id) => {
@@ -216,7 +210,6 @@ impl ApiError {
         }
     }
 
-    #[allow(dead_code)]
     pub fn sparse_not_supported(record_id: &str) -> Self {
         ApiError::BadRequest {
             code: ErrorCode::SparseNotSupported,
@@ -256,7 +249,6 @@ impl ApiError {
         }
     }
 
-    #[allow(dead_code)]
     pub fn groupby_field_missing(field: &str) -> Self {
         ApiError::BadRequest {
             code: ErrorCode::GroupbyFieldMissing,
@@ -275,7 +267,6 @@ impl ApiError {
         }
     }
 
-    #[allow(dead_code)]
     pub fn index_not_ready(collection: &str, status: &str) -> Self {
         ApiError::Conflict {
             code: ErrorCode::IndexNotReady,

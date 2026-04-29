@@ -939,6 +939,50 @@ async fn query_without_group_by_returns_flat_matches() {
 }
 
 #[tokio::test]
+async fn query_group_by_missing_field_returns_typed_error() {
+    let server = common::start_test_server().await;
+    let collection = common::create_test_index(&server, 3, "cosine").await;
+    let client = reqwest::Client::new();
+
+    // Insert records that do NOT carry the field we'll group by.
+    client
+        .post(format!(
+            "{}/v1/collections/{collection}/records/upsert",
+            server.base_url
+        ))
+        .json(&json!({
+            "records": [
+                {"id": "r1", "values": [1.0, 0.0, 0.0], "metadata": {"category": "a"}},
+                {"id": "r2", "values": [0.9, 0.1, 0.0], "metadata": {"category": "b"}}
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    let resp = client
+        .post(format!(
+            "{}/v1/collections/{collection}/query",
+            server.base_url
+        ))
+        .json(&json!({
+            "vector": [1.0, 0.0, 0.0],
+            "topK": 5,
+            "groupBy": {"field": "doc", "limit": 5, "groupSize": 2}
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 400);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "GROUPBY_FIELD_MISSING");
+    assert_eq!(body["error"]["details"]["field"], "doc");
+
+    common::cleanup_index(&server, &collection).await;
+}
+
+#[tokio::test]
 async fn recommend_basic() {
     let server = common::start_test_server().await;
     let collection = common::create_test_index(&server, 3, "cosine").await;

@@ -22,16 +22,22 @@ pub async fn resolve_collection(
     pool: &sqlx::PgPool,
     name: &str,
 ) -> Result<CollectionMeta, ApiError> {
-    // Try direct collection lookup first
+    // Direct lookup by collection name. We intentionally do NOT filter by
+    // `status = 'ready'` here so we can distinguish "does not exist" from
+    // "exists but not yet ready" and surface the latter as INDEX_NOT_READY.
     let row = sqlx::query(
-        "SELECT id, dimension, metric, bm25_enabled \
-         FROM _onecortex_vector.collections WHERE name = $1 AND status = 'ready'",
+        "SELECT id, dimension, metric, bm25_enabled, status \
+         FROM _onecortex_vector.collections WHERE name = $1",
     )
     .bind(name)
     .fetch_optional(pool)
     .await?;
 
     if let Some(row) = row {
+        let status: String = row.get("status");
+        if status != "ready" {
+            return Err(ApiError::index_not_ready(name, &status));
+        }
         return Ok(CollectionMeta {
             id: row.get("id"),
             dimension: row.get("dimension"),
@@ -40,17 +46,22 @@ pub async fn resolve_collection(
         });
     }
 
-    // Fall back to alias resolution: alias -> collection_name -> collection record
+    // Fall back to alias resolution: alias -> collection_name -> collection record.
     let alias_row = sqlx::query(
-        "SELECT i.id, i.dimension, i.metric, i.bm25_enabled \
+        "SELECT i.id, i.dimension, i.metric, i.bm25_enabled, i.status \
          FROM _onecortex_vector.aliases a \
          JOIN _onecortex_vector.collections i ON a.collection_name = i.name \
-         WHERE a.alias = $1 AND i.status = 'ready'",
+         WHERE a.alias = $1",
     )
     .bind(name)
     .fetch_optional(pool)
     .await?
     .ok_or_else(|| ApiError::collection_not_found(name))?;
+
+    let status: String = alias_row.get("status");
+    if status != "ready" {
+        return Err(ApiError::index_not_ready(name, &status));
+    }
 
     Ok(CollectionMeta {
         id: alias_row.get("id"),
@@ -112,18 +123,14 @@ pub async fn upsert_records(
             )));
         }
         if r.values.len() != collection.dimension as usize {
-            return Err(ApiError::invalid_argument(format!(
-                "record '{}' has {} dimensions but collection expects {}",
-                r.id,
+            return Err(ApiError::dimension_mismatch(
+                Some(&r.id),
+                collection.dimension as usize,
                 r.values.len(),
-                collection.dimension
-            )));
+            ));
         }
         if r.sparse_values.is_some() {
-            tracing::warn!(
-                record_id = %r.id,
-                "received sparseValues for record; sparse vectors are not supported and will be silently ignored"
-            );
+            return Err(ApiError::sparse_not_supported(&r.id));
         }
     }
 

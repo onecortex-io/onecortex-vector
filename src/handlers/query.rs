@@ -163,6 +163,14 @@ pub async fn query_vectors(
         ));
     };
 
+    if query_vec.len() != collection.dimension as usize {
+        return Err(ApiError::dimension_mismatch(
+            None,
+            collection.dimension as usize,
+            query_vec.len(),
+        ));
+    }
+
     // Build query vector string for SQL
     let vec_str = format!(
         "[{}]",
@@ -338,17 +346,24 @@ pub async fn query_vectors(
         let mut group_order: Vec<String> = Vec::new();
         let mut groups_map: std::collections::HashMap<String, Vec<Match>> =
             std::collections::HashMap::new();
+        let total_matches = matches.len();
+        let mut field_seen = false;
 
         for m in matches {
-            let group_key = m
+            let raw = m
                 .metadata
                 .as_ref()
-                .and_then(|meta| meta.get(&group_opts.field))
-                .map(|v| match v.as_str() {
-                    Some(s) => s.to_string(),
-                    None => v.to_string(),
-                })
-                .unwrap_or_default();
+                .and_then(|meta| meta.get(&group_opts.field));
+            let group_key = match raw {
+                Some(v) => {
+                    field_seen = true;
+                    match v.as_str() {
+                        Some(s) => s.to_string(),
+                        None => v.to_string(),
+                    }
+                }
+                None => String::new(),
+            };
 
             if !groups_map.contains_key(&group_key) {
                 group_order.push(group_key.clone());
@@ -366,6 +381,13 @@ pub async fn query_vectors(
                     },
                 });
             }
+        }
+
+        // If matches existed but none of them carried the requested field,
+        // surface a typed error rather than returning a single empty-key
+        // bucket — that silent default has burned users in the past.
+        if total_matches > 0 && !field_seen {
+            return Err(ApiError::groupby_field_missing(&group_opts.field));
         }
 
         let groups: Vec<GroupResult> = group_order
@@ -416,6 +438,14 @@ pub async fn query_hybrid(
 
     if !collection.bm25_enabled {
         return Err(ApiError::hybrid_requires_bm25(&collection_name));
+    }
+
+    if req.vector.len() != collection.dimension as usize {
+        return Err(ApiError::dimension_mismatch(
+            None,
+            collection.dimension as usize,
+            req.vector.len(),
+        ));
     }
 
     let mut result = crate::planner::hybrid::hybrid_query(

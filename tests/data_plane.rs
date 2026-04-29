@@ -97,12 +97,12 @@ async fn upsert_dimension_mismatch() {
 }
 
 #[tokio::test]
-async fn upsert_sparse_values_accepted() {
+async fn upsert_sparse_values_rejected() {
     let server = common::start_test_server().await;
     let name = common::create_test_index(&server, 3, "cosine").await;
     let client = Client::new();
 
-    // sparseValues should be accepted without error
+    // sparseValues are not supported and should be rejected with a typed code.
     let resp = client
         .post(format!(
             "{}/v1/collections/{name}/records/upsert",
@@ -118,7 +118,61 @@ async fn upsert_sparse_values_accepted() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.status(), 400);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "SPARSE_NOT_SUPPORTED");
+    assert_eq!(body["error"]["details"]["recordId"], "v1");
+
+    common::cleanup_index(&server, &name).await;
+}
+
+#[tokio::test]
+async fn query_with_mismatched_vector_dimension_rejected() {
+    let server = common::start_test_server().await;
+    let name = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    let resp = client
+        .post(format!("{}/v1/collections/{name}/query", server.base_url))
+        .json(&json!({
+            "vector": [1.0, 0.0, 0.0, 0.0, 0.0],
+            "topK": 5
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 400);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "DIMENSION_MISMATCH");
+    assert_eq!(body["error"]["details"]["expected"], 3);
+    assert_eq!(body["error"]["details"]["got"], 5);
+
+    common::cleanup_index(&server, &name).await;
+}
+
+#[tokio::test]
+async fn upsert_with_mismatched_vector_dimension_rejected() {
+    let server = common::start_test_server().await;
+    let name = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    let resp = client
+        .post(format!(
+            "{}/v1/collections/{name}/records/upsert",
+            server.base_url
+        ))
+        .json(&json!({
+            "records": [{ "id": "x", "values": [0.1, 0.2] }]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 400);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "DIMENSION_MISMATCH");
+    assert_eq!(body["error"]["details"]["recordId"], "x");
+    assert_eq!(body["error"]["details"]["expected"], 3);
+    assert_eq!(body["error"]["details"]["got"], 2);
 
     common::cleanup_index(&server, &name).await;
 }
