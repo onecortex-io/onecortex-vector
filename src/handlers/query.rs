@@ -311,7 +311,7 @@ pub async fn query_vectors(
                 rerank_opts.model.as_deref(),
             )
             .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))?;
+            .map_err(ApiError::from)?;
 
         matches = reranked
             .into_iter()
@@ -458,7 +458,7 @@ pub async fn query_hybrid(
                 rerank_opts.model.as_deref(),
             )
             .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))?;
+            .map_err(ApiError::from)?;
 
         result.matches = reranked
             .into_iter()

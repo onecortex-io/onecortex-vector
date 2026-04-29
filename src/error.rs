@@ -6,8 +6,8 @@ use axum::{
 
 /// Stable, machine-readable error codes returned in the `error.code` field of
 /// every error body. SDKs build typed exception hierarchies on top of these.
-// New variants beyond the original five are wired in subsequent commits;
-// allow dead_code until then so the bin target compiles cleanly.
+// A few variants are wired only in tests at the time of writing; allow
+// dead_code so the bin target compiles cleanly before those wirings land.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub enum ErrorCode {
@@ -84,10 +84,70 @@ pub enum ApiError {
         message: String,
         details: Option<serde_json::Value>,
     },
+    /// Failures bubbling up from an upstream service (today: the reranker).
+    /// Carries an explicit status because the family spans 429/502/503/504.
+    #[error("{message}")]
+    Upstream {
+        status: StatusCode,
+        code: ErrorCode,
+        message: String,
+        details: Option<serde_json::Value>,
+    },
     #[error("Internal server error")]
     Internal(#[from] anyhow::Error),
     #[error("Database error")]
     Database(#[from] sqlx::Error),
+}
+
+impl From<crate::planner::reranker::RerankerError> for ApiError {
+    fn from(err: crate::planner::reranker::RerankerError) -> Self {
+        use crate::planner::reranker::{HttpKind, RerankerError};
+        match err {
+            RerankerError::RateLimited(retries) => ApiError::Upstream {
+                status: StatusCode::TOO_MANY_REQUESTS,
+                code: ErrorCode::RerankerRateLimited,
+                message: format!("reranker upstream rate limited after {retries} retries"),
+                details: Some(serde_json::json!({ "retries": retries })),
+            },
+            RerankerError::Http {
+                kind: HttpKind::Timeout,
+                message,
+            } => ApiError::Upstream {
+                status: StatusCode::GATEWAY_TIMEOUT,
+                code: ErrorCode::RerankerTimeout,
+                message: format!("reranker upstream timed out: {message}"),
+                details: Some(serde_json::json!({ "kind": "timeout" })),
+            },
+            RerankerError::Http { kind, message } => {
+                let details = match &kind {
+                    HttpKind::Status(s) => {
+                        serde_json::json!({ "kind": "status", "upstreamStatus": s })
+                    }
+                    HttpKind::Connect => serde_json::json!({ "kind": "connect" }),
+                    HttpKind::Other => serde_json::json!({ "kind": "other" }),
+                    HttpKind::Timeout => unreachable!(),
+                };
+                ApiError::Upstream {
+                    status: StatusCode::BAD_GATEWAY,
+                    code: ErrorCode::RerankerUpstream,
+                    message: format!("reranker upstream error: {message}"),
+                    details: Some(details),
+                }
+            }
+            RerankerError::Parse(message) => ApiError::Upstream {
+                status: StatusCode::BAD_GATEWAY,
+                code: ErrorCode::RerankerUpstream,
+                message: format!("reranker upstream returned an unparseable response: {message}"),
+                details: Some(serde_json::json!({ "kind": "parse" })),
+            },
+            RerankerError::Config(message) => ApiError::Upstream {
+                status: StatusCode::SERVICE_UNAVAILABLE,
+                code: ErrorCode::RerankerConfig,
+                message: format!("reranker is not configured correctly: {message}"),
+                details: None,
+            },
+        }
+    }
 }
 
 impl From<crate::planner::filter_translator::FilterError> for ApiError {
@@ -280,6 +340,12 @@ impl IntoResponse for ApiError {
                 message,
                 details,
             } => (StatusCode::FORBIDDEN, code.as_str(), message, details),
+            ApiError::Upstream {
+                status,
+                code,
+                message,
+                details,
+            } => (status, code.as_str(), message, details),
             ApiError::Internal(e) => {
                 tracing::error!(error = %e, "Internal error");
                 (
@@ -432,6 +498,59 @@ mod tests {
         assert_eq!(status, StatusCode::CONFLICT);
         assert_eq!(body["error"]["code"], "COLLECTION_ALREADY_EXISTS");
         assert_eq!(body["error"]["details"]["collection"], "docs");
+    }
+
+    #[tokio::test]
+    async fn reranker_rate_limited_maps_to_429() {
+        use crate::planner::reranker::RerankerError;
+        let (status, body) = render(RerankerError::RateLimited(3).into()).await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(body["error"]["code"], "RERANKER_RATE_LIMITED");
+        assert_eq!(body["error"]["details"]["retries"], 3);
+    }
+
+    #[tokio::test]
+    async fn reranker_config_maps_to_503() {
+        use crate::planner::reranker::RerankerError;
+        let (status, body) =
+            render(RerankerError::Config("missing api key".to_string()).into()).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["error"]["code"], "RERANKER_CONFIG");
+    }
+
+    #[tokio::test]
+    async fn reranker_http_status_maps_to_502() {
+        use crate::planner::reranker::{HttpKind, RerankerError};
+        let err = RerankerError::Http {
+            kind: HttpKind::Status(500),
+            message: "Cohere error 500: bad gateway".to_string(),
+        };
+        let (status, body) = render(err.into()).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(body["error"]["code"], "RERANKER_UPSTREAM");
+        assert_eq!(body["error"]["details"]["upstreamStatus"], 500);
+    }
+
+    #[tokio::test]
+    async fn reranker_http_timeout_maps_to_504() {
+        use crate::planner::reranker::{HttpKind, RerankerError};
+        let err = RerankerError::Http {
+            kind: HttpKind::Timeout,
+            message: "deadline exceeded".to_string(),
+        };
+        let (status, body) = render(err.into()).await;
+        assert_eq!(status, StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(body["error"]["code"], "RERANKER_TIMEOUT");
+    }
+
+    #[tokio::test]
+    async fn reranker_parse_maps_to_502() {
+        use crate::planner::reranker::RerankerError;
+        let (status, body) =
+            render(RerankerError::Parse("expected field 'results'".to_string()).into()).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(body["error"]["code"], "RERANKER_UPSTREAM");
+        assert_eq!(body["error"]["details"]["kind"], "parse");
     }
 
     #[tokio::test]

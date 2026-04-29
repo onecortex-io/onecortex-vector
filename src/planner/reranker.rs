@@ -25,16 +25,59 @@ pub struct RerankResult {
     pub values: Option<Vec<f32>>,
 }
 
+/// Classification of an upstream HTTP failure, used to pick the right
+/// HTTP status when bubbling out to the API edge.
+#[derive(Debug, Clone)]
+pub enum HttpKind {
+    /// Request timed out (we never heard back from the provider).
+    Timeout,
+    /// TCP/TLS connect failure or DNS error before the request was sent.
+    Connect,
+    /// We got a response, but the provider returned a non-2xx status.
+    Status(u16),
+    /// Anything else — body decode error, redirect loop, etc.
+    Other,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum RerankerError {
-    #[error("Reranker HTTP error: {0}")]
-    Http(String),
+    #[error("Reranker HTTP error ({kind:?}): {message}")]
+    Http { kind: HttpKind, message: String },
     #[error("Reranker response parse error: {0}")]
     Parse(String),
     #[error("Reranker configuration error: {0}")]
     Config(String),
     #[error("Reranker upstream rate limited after {0} retries")]
     RateLimited(u32),
+}
+
+impl RerankerError {
+    /// Classify a reqwest transport error into a `RerankerError::Http` with
+    /// the matching `HttpKind`.
+    pub fn from_reqwest(e: reqwest::Error) -> Self {
+        let kind = if e.is_timeout() {
+            HttpKind::Timeout
+        } else if e.is_connect() {
+            HttpKind::Connect
+        } else if let Some(status) = e.status() {
+            HttpKind::Status(status.as_u16())
+        } else {
+            HttpKind::Other
+        };
+        RerankerError::Http {
+            kind,
+            message: e.to_string(),
+        }
+    }
+
+    /// Build a `RerankerError::Http` from a non-2xx response status and the
+    /// provider-supplied error body.
+    pub fn http_status(status: reqwest::StatusCode, message: impl Into<String>) -> Self {
+        RerankerError::Http {
+            kind: HttpKind::Status(status.as_u16()),
+            message: message.into(),
+        }
+    }
 }
 
 /// Reranker trait. All implementations must be Send + Sync (stored in Arc<dyn Reranker>).
@@ -76,7 +119,7 @@ async fn send_with_retry(
         let response = build_request()
             .send()
             .await
-            .map_err(|e| RerankerError::Http(e.to_string()))?;
+            .map_err(RerankerError::from_reqwest)?;
 
         if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
             if attempt == max_retries {
@@ -226,9 +269,10 @@ impl Reranker for CohereReranker {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(RerankerError::Http(format!(
-                "Cohere error {status}: {text}"
-            )));
+            return Err(RerankerError::http_status(
+                status,
+                format!("Cohere error {status}: {text}"),
+            ));
         }
 
         let resp: CohereV2RerankResponse = response
@@ -358,9 +402,10 @@ impl Reranker for VoyageReranker {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(RerankerError::Http(format!(
-                "Voyage error {status}: {text}"
-            )));
+            return Err(RerankerError::http_status(
+                status,
+                format!("Voyage error {status}: {text}"),
+            ));
         }
 
         let resp: VoyageRerankResponse = response
@@ -487,7 +532,10 @@ impl Reranker for JinaReranker {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(RerankerError::Http(format!("Jina error {status}: {text}")));
+            return Err(RerankerError::http_status(
+                status,
+                format!("Jina error {status}: {text}"),
+            ));
         }
 
         let resp: JinaRerankResponse = response
@@ -631,9 +679,10 @@ impl Reranker for PineconeReranker {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(RerankerError::Http(format!(
-                "Pinecone error {status}: {text}"
-            )));
+            return Err(RerankerError::http_status(
+                status,
+                format!("Pinecone error {status}: {text}"),
+            ));
         }
 
         let resp: PineconeRerankResponse = response
@@ -735,14 +784,15 @@ impl Reranker for CrossEncoderReranker {
             .json(&body)
             .send()
             .await
-            .map_err(|e| RerankerError::Http(e.to_string()))?;
+            .map_err(RerankerError::from_reqwest)?;
 
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(RerankerError::Http(format!(
-                "Cross-encoder error {status}: {text}"
-            )));
+            return Err(RerankerError::http_status(
+                status,
+                format!("Cross-encoder error {status}: {text}"),
+            ));
         }
 
         let tei_results: Vec<TeiRerankResult> = response
