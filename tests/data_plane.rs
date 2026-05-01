@@ -1024,3 +1024,59 @@ async fn filter_elem_match_no_results() {
 
     common::cleanup_index(&server, &name).await;
 }
+
+/// Regression: a batch with the same id repeated multiple times must succeed
+/// (200) instead of triggering Postgres "ON CONFLICT DO UPDATE command cannot
+/// affect row a second time". The last occurrence wins (last-write-wins) and
+/// `upsertedCount` reports the number of distinct ids.
+#[tokio::test]
+async fn upsert_dedupes_duplicate_ids_within_batch() {
+    let server = common::start_test_server().await;
+    let name = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    // 5 records, but only 3 distinct ids: r1 appears 3x with different values.
+    let resp = client
+        .post(format!(
+            "{}/v1/collections/{name}/records/upsert",
+            server.base_url
+        ))
+        .json(&json!({
+            "records": [
+                {"id": "r1", "values": [1.0, 0.0, 0.0], "metadata": {"v": "first"}},
+                {"id": "r2", "values": [0.0, 1.0, 0.0], "metadata": {"v": "r2"}},
+                {"id": "r1", "values": [0.5, 0.5, 0.0], "metadata": {"v": "second"}},
+                {"id": "r3", "values": [0.0, 0.0, 1.0], "metadata": {"v": "r3"}},
+                {"id": "r1", "values": [0.1, 0.2, 0.3], "metadata": {"v": "last"}},
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["upsertedCount"], 3, "expected 3 distinct ids");
+
+    // Fetch r1: must reflect the LAST occurrence in the batch.
+    let resp = client
+        .post(format!(
+            "{}/v1/collections/{name}/records/fetch",
+            server.base_url
+        ))
+        .json(&json!({ "ids": ["r1", "r2", "r3"] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let records = body["records"].as_array().unwrap();
+    assert_eq!(records.len(), 3, "all 3 distinct ids must be present");
+
+    let r1 = records.iter().find(|r| r["id"] == "r1").unwrap();
+    assert_eq!(
+        r1["metadata"]["v"], "last",
+        "r1 must reflect the LAST occurrence (last-write-wins)"
+    );
+
+    common::cleanup_index(&server, &name).await;
+}

@@ -2,6 +2,7 @@ use crate::{error::ApiError, state::AppState};
 use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
+use std::collections::HashMap;
 
 pub struct CollectionMeta {
     pub id: uuid::Uuid,
@@ -134,6 +135,32 @@ pub async fn upsert_records(
         }
     }
 
+    // Dedupe records by id within this batch (last-write-wins).
+    // Postgres rejects multi-row INSERT ... ON CONFLICT DO UPDATE statements
+    // that would touch the same target row twice, so we collapse duplicate
+    // ids in the request before issuing the SQL. namespace is request-scoped
+    // (one per body), so id alone is sufficient. Order is preserved by the
+    // index of each id's last occurrence.
+    let deduped: Vec<&RecordInput> = {
+        let mut last_idx: HashMap<&str, usize> = HashMap::with_capacity(req.records.len());
+        for (i, r) in req.records.iter().enumerate() {
+            last_idx.insert(r.id.as_str(), i);
+        }
+        let mut indices: Vec<usize> = last_idx.into_values().collect();
+        indices.sort_unstable();
+        indices.into_iter().map(|i| &req.records[i]).collect()
+    };
+
+    let collapsed = req.records.len() - deduped.len();
+    if collapsed > 0 {
+        tracing::info!(
+            batch_size = req.records.len(),
+            unique_ids = deduped.len(),
+            collapsed,
+            "upsert: collapsed duplicate ids within batch"
+        );
+    }
+
     let table = collection.table_ref();
     let upsert_sql = format!(
         "INSERT INTO {table} (id, namespace, values, text_content, metadata, updated_at) VALUES "
@@ -141,7 +168,7 @@ pub async fn upsert_records(
 
     let mut qb = sqlx::QueryBuilder::new(upsert_sql);
     let mut sep = qb.separated(", ");
-    for r in &req.records {
+    for r in &deduped {
         let embedding_str = format!(
             "[{}]",
             r.values
@@ -171,7 +198,7 @@ pub async fn upsert_records(
 
     qb.build().execute(&state.pool).await?;
 
-    let count = req.records.len() as i64;
+    let count = deduped.len() as i64;
 
     // Async stats update -- fire and forget, non-blocking
     let pool = state.pool.clone();
