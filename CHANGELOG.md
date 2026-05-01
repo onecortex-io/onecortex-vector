@@ -4,6 +4,27 @@ All notable changes to onecortex-vector are documented here. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] — 2026-05-01
+
+### Fixed
+
+- **Upsert no longer 500s on duplicate ids within a batch.** A request
+  whose `records[]` contained the same `id` more than once would trip
+  Postgres `ON CONFLICT DO UPDATE command cannot affect row a second
+  time` and surface as `500 INTERNAL`. The handler now deduplicates
+  records by `id` before issuing the SQL, keeping the **last**
+  occurrence (last-write-wins). `upsertedCount` reflects the number of
+  distinct ids actually written, and the server emits an `info`-level
+  log line with `batch_size`, `unique_ids`, and `collapsed` whenever
+  duplicates are collapsed.
+
+### Changed
+
+- Documentation: `CLAUDE.md` corrected to state that `sparseValues` is
+  rejected with 400 `SPARSE_NOT_SUPPORTED` (the prior "silently dropped
+  + WARN logged" wording was stale post-0.2.0).
+- `docs/api-reference.md` documents the upsert duplicate-id contract.
+
 ## [0.2.0] — 2026-04-29
 
 ### Breaking changes
