@@ -23,7 +23,7 @@ carries an `X-Request-Id` header.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/v1/collections/:name/records/upsert` | Upsert records |
+| POST | `/v1/collections/:name/records/upsert` | Upsert records (see [Upsert: duplicate ids](#upsert-duplicate-ids)) |
 | POST | `/v1/collections/:name/records/fetch` | Fetch records by id |
 | POST | `/v1/collections/:name/records/fetch_by_metadata` | Fetch records by metadata filter |
 | POST | `/v1/collections/:name/records/delete` | Delete records |
@@ -36,6 +36,15 @@ carries an `X-Request-Id` header.
 | POST | `/v1/collections/:name/query/batch` | Up to 10 queries concurrently |
 | POST | `/v1/collections/:name/recommend` | Recommend by positive/negative example ids |
 | POST | `/v1/collections/:name/facets` | Aggregated counts of distinct metadata values |
+
+### Upsert: duplicate ids
+
+Records are deduplicated by `id` within each upsert request before being
+written. If the same `id` appears multiple times in `records[]`, the
+**last** occurrence wins (last-write-wins). The response field
+`upsertedCount` reflects the number of distinct ids that were actually
+written, which may be less than `records.length`. Namespace is
+request-scoped, so dedupe is by `id` only.
 
 ## Namespaces
 

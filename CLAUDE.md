@@ -28,7 +28,7 @@ cargo clippy -- -D warnings
 | DiskANN `num_neighbors` | 50 (not 64) |
 | RLS pattern | `set_config('app.current_namespace', $1, true)` inside `pool.begin()` — NEVER bare `SET` |
 | Euclidean score | `1/(1+dist)` |
-| SPARSEVEC | Not stored; `sparseValues` in upsert requests is silently dropped + WARN logged |
+| SPARSEVEC | Not stored; `sparseValues` in upsert requests is rejected with 400 `SPARSE_NOT_SUPPORTED` |
 | BM25 score | `<@>` returns negative; always negate before ranking |
 | API prefix | All public routes are under `/v1/`; health endpoints (`/health`, `/ready`, `/version`) are unversioned |
 | JSON casing | All request/response fields use camelCase (`bm25Enabled`, `topK`, `includeMetadata`, `deletionProtected`) — `#[serde(rename_all = "camelCase")]` on every DTO |
