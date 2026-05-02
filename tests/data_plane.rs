@@ -1025,6 +1025,156 @@ async fn filter_elem_match_no_results() {
     common::cleanup_index(&server, &name).await;
 }
 
+// --- $contains / $containsAny / $containsAll (arrays of scalars) ---
+
+async fn seed_array_metadata(server: &common::TestServer) -> String {
+    let name = common::create_test_index(server, 3, "cosine").await;
+    let client = Client::new();
+    client
+        .post(format!(
+            "{}/v1/collections/{name}/records/upsert",
+            server.base_url
+        ))
+        .json(&json!({
+            "records": [
+                {"id": "arxiv", "values": [1.0, 0.0, 0.0],
+                 "metadata": {"authors": ["Lewis", "Perez"], "year": 2024}},
+                {"id": "blog-eval", "values": [0.0, 1.0, 0.0],
+                 "metadata": {"authors": ["Cortex Team"], "year": 2025}},
+                {"id": "paper", "values": [0.0, 0.0, 1.0],
+                 "metadata": {"authors": ["Smith", "Johnson"], "year": 2024}},
+                {"id": "scalar-author", "values": [0.5, 0.5, 0.0],
+                 "metadata": {"authors": "Cortex Team", "year": 2025}},
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    name
+}
+
+#[tokio::test]
+async fn filter_contains_hit() {
+    let server = common::start_test_server().await;
+    let name = seed_array_metadata(&server).await;
+    let client = Client::new();
+
+    let resp = client
+        .post(format!(
+            "{}/v1/collections/{name}/records/fetch_by_metadata",
+            server.base_url
+        ))
+        .json(&json!({"filter": {"authors": {"$contains": "Cortex Team"}}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let records = body["records"].as_array().unwrap();
+    let ids: Vec<&str> = records.iter().map(|r| r["id"].as_str().unwrap()).collect();
+    // Only the array-valued metadata matches; scalar-valued "authors": "Cortex Team" must NOT.
+    assert_eq!(ids, vec!["blog-eval"]);
+
+    common::cleanup_index(&server, &name).await;
+}
+
+#[tokio::test]
+async fn filter_contains_no_results() {
+    let server = common::start_test_server().await;
+    let name = seed_array_metadata(&server).await;
+    let client = Client::new();
+
+    let resp = client
+        .post(format!(
+            "{}/v1/collections/{name}/records/fetch_by_metadata",
+            server.base_url
+        ))
+        .json(&json!({"filter": {"authors": {"$contains": "Nobody"}}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["records"].as_array().unwrap().len(), 0);
+
+    common::cleanup_index(&server, &name).await;
+}
+
+#[tokio::test]
+async fn filter_contains_any_hit() {
+    let server = common::start_test_server().await;
+    let name = seed_array_metadata(&server).await;
+    let client = Client::new();
+
+    let resp = client
+        .post(format!(
+            "{}/v1/collections/{name}/records/fetch_by_metadata",
+            server.base_url
+        ))
+        .json(&json!({"filter": {"authors": {"$containsAny": ["Cortex Team", "Lewis"]}}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let mut ids: Vec<String> = body["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap().to_string())
+        .collect();
+    ids.sort();
+    assert_eq!(ids, vec!["arxiv".to_string(), "blog-eval".to_string()]);
+
+    common::cleanup_index(&server, &name).await;
+}
+
+#[tokio::test]
+async fn filter_contains_all_hit() {
+    let server = common::start_test_server().await;
+    let name = seed_array_metadata(&server).await;
+    let client = Client::new();
+
+    let resp = client
+        .post(format!(
+            "{}/v1/collections/{name}/records/fetch_by_metadata",
+            server.base_url
+        ))
+        .json(&json!({"filter": {"authors": {"$containsAll": ["Smith", "Johnson"]}}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let records = body["records"].as_array().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["id"], "paper");
+
+    common::cleanup_index(&server, &name).await;
+}
+
+#[tokio::test]
+async fn filter_contains_any_empty_rejected() {
+    let server = common::start_test_server().await;
+    let name = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    let resp = client
+        .post(format!(
+            "{}/v1/collections/{name}/records/fetch_by_metadata",
+            server.base_url
+        ))
+        .json(&json!({"filter": {"tags": {"$containsAny": []}}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 400);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "FILTER_MALFORMED");
+
+    common::cleanup_index(&server, &name).await;
+}
+
 /// Regression: a batch with the same id repeated multiple times must succeed
 /// (200) instead of triggering Postgres "ON CONFLICT DO UPDATE command cannot
 /// affect row a second time". The last occurrence wins (last-write-wins) and

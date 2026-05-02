@@ -64,11 +64,39 @@ have a metadata field with `lat`/`lon` sub-keys:
 ### Array element matching
 
 `$elemMatch` filters records where at least one element in a metadata
-array field matches a sub-filter object:
+array field matches a sub-filter object. Use it for **arrays of objects**:
 
 ```json
 { "tags": { "$elemMatch": { "type": "premium" } } }
 ```
+
+### Array contains (scalar elements)
+
+For metadata fields whose value is an **array of scalars** (strings,
+numbers, or booleans) — e.g. `tags`, `authors`, `categories`,
+`tenant_ids` — use the `$contains` family:
+
+| Operator | Operand | Semantics |
+|---|---|---|
+| `$contains` | scalar | array contains the given value |
+| `$containsAny` | array of scalars | array intersects the given list (OR) |
+| `$containsAll` | array of scalars | array is a superset of the given list (AND) |
+
+```json
+{ "authors":  { "$contains": "Cortex Team" } }
+{ "authors":  { "$containsAny": ["Cortex Team", "Lewis"] } }
+{ "authors":  { "$containsAll": ["Smith", "Johnson"] } }
+```
+
+Notes:
+
+- The operand must be a JSON scalar (or array of scalars). Nested
+  objects/arrays are rejected with `FILTER_MALFORMED` — use
+  `$elemMatch` for arrays of objects.
+- `$containsAny` / `$containsAll` reject empty arrays.
+- These operators are distinct from `$in` / `$nin`, which test whether
+  a **scalar** field equals one of a list of values. `$in` does not
+  inspect array contents.
 
 ## Errors
 

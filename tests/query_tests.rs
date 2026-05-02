@@ -450,6 +450,53 @@ async fn query_with_metadata_filter() {
 }
 
 #[tokio::test]
+async fn query_with_contains_filter() {
+    let server = common::start_test_server().await;
+    let name = common::create_test_index(&server, 3, "cosine").await;
+    let client = Client::new();
+
+    client
+        .post(format!(
+            "{}/v1/collections/{name}/records/upsert",
+            server.base_url
+        ))
+        .json(&json!({
+            "records": [
+                {"id": "a", "values": [1.0, 0.0, 0.0], "metadata": {"tags": ["rag", "ml"]}},
+                {"id": "b", "values": [0.9, 0.1, 0.0], "metadata": {"tags": ["sports"]}},
+                {"id": "c", "values": [0.8, 0.2, 0.0], "metadata": {"tags": ["rag"]}},
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    let resp = client
+        .post(format!("{}/v1/collections/{name}/query", server.base_url))
+        .json(&json!({
+            "vector": [1.0, 0.0, 0.0],
+            "topK": 10,
+            "filter": {"tags": {"$contains": "rag"}},
+            "includeMetadata": true,
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let matches = body["matches"].as_array().unwrap();
+    assert_eq!(matches.len(), 2);
+    let mut ids: Vec<String> = matches
+        .iter()
+        .map(|m| m["id"].as_str().unwrap().to_string())
+        .collect();
+    ids.sort();
+    assert_eq!(ids, vec!["a".to_string(), "c".to_string()]);
+
+    common::cleanup_index(&server, &name).await;
+}
+
+#[tokio::test]
 async fn query_top_k_too_large() {
     let server = common::start_test_server().await;
     let name = common::create_test_index(&server, 3, "cosine").await;

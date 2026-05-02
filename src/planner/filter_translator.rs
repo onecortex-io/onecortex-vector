@@ -207,13 +207,87 @@ pub fn translate_filter(
                             let obj_path = jsonb_object_path(field);
                             format!("{obj_path} @> '[{escaped}]'::jsonb")
                         }
+                        "$contains" => {
+                            // Match arrays of scalars: metadata->'field' @> '[<value>]'::jsonb
+                            if !is_filter_scalar(op_val) {
+                                return Err(FilterError::Malformed(
+                                    "$contains value must be a scalar (string, number, or boolean)"
+                                        .to_string(),
+                                ));
+                            }
+                            let value_json = serde_json::to_string(op_val).map_err(|e| {
+                                FilterError::Malformed(format!(
+                                    "$contains serialization error: {e}"
+                                ))
+                            })?;
+                            let escaped = value_json.replace('\'', "''");
+                            let obj_path = jsonb_object_path(field);
+                            format!("{obj_path} @> '[{escaped}]'::jsonb")
+                        }
+                        "$containsAny" => {
+                            let arr = op_val.as_array().ok_or_else(|| {
+                                FilterError::Malformed(
+                                    "$containsAny requires an array of scalars".to_string(),
+                                )
+                            })?;
+                            if arr.is_empty() {
+                                return Err(FilterError::Malformed(
+                                    "$containsAny array must not be empty".to_string(),
+                                ));
+                            }
+                            let obj_path = jsonb_object_path(field);
+                            let mut clauses = Vec::with_capacity(arr.len());
+                            for v in arr {
+                                if !is_filter_scalar(v) {
+                                    return Err(FilterError::Malformed(
+                                        "$containsAny array elements must be scalars".to_string(),
+                                    ));
+                                }
+                                let value_json = serde_json::to_string(v).map_err(|e| {
+                                    FilterError::Malformed(format!(
+                                        "$containsAny serialization error: {e}"
+                                    ))
+                                })?;
+                                let escaped = value_json.replace('\'', "''");
+                                clauses.push(format!("{obj_path} @> '[{escaped}]'::jsonb"));
+                            }
+                            format!("({})", clauses.join(" OR "))
+                        }
+                        "$containsAll" => {
+                            let arr = op_val.as_array().ok_or_else(|| {
+                                FilterError::Malformed(
+                                    "$containsAll requires an array of scalars".to_string(),
+                                )
+                            })?;
+                            if arr.is_empty() {
+                                return Err(FilterError::Malformed(
+                                    "$containsAll array must not be empty".to_string(),
+                                ));
+                            }
+                            for v in arr {
+                                if !is_filter_scalar(v) {
+                                    return Err(FilterError::Malformed(
+                                        "$containsAll array elements must be scalars".to_string(),
+                                    ));
+                                }
+                            }
+                            let array_json = serde_json::to_string(op_val).map_err(|e| {
+                                FilterError::Malformed(format!(
+                                    "$containsAll serialization error: {e}"
+                                ))
+                            })?;
+                            let escaped = array_json.replace('\'', "''");
+                            let obj_path = jsonb_object_path(field);
+                            format!("{obj_path} @> '{escaped}'::jsonb")
+                        }
                         other => return Err(FilterError::UnsupportedOperator(other.to_string())),
                     };
 
                     // $in and $nin embed values directly (safe because we quote them above)
                     // All other operators use parameterized binds
                     match op.as_str() {
-                        "$in" | "$nin" | "$geoRadius" | "$geoBBox" | "$elemMatch" => {} // values inlined in SQL above
+                        "$in" | "$nin" | "$geoRadius" | "$geoBBox" | "$elemMatch" | "$contains"
+                        | "$containsAny" | "$containsAll" => {} // values inlined in SQL above
                         _ => {
                             params.push(op_val.clone());
                         }
@@ -252,6 +326,12 @@ pub(crate) fn jsonb_field_accessor(field: &str) -> String {
 ///
 /// "location"  -> "metadata->'location'"
 /// "place.geo" -> "metadata->'place'->'geo'"
+/// True for JSON values that are valid as `$contains`/`$containsAny`/`$containsAll`
+/// elements: strings, numbers, booleans. Rejects null, arrays, and objects.
+fn is_filter_scalar(v: &Value) -> bool {
+    v.is_string() || v.is_number() || v.is_boolean()
+}
+
 pub(crate) fn jsonb_object_path(field: &str) -> String {
     let mut acc = "metadata".to_string();
     for part in field.split('.') {
@@ -447,6 +527,139 @@ mod tests {
         )
         .unwrap();
         // $gte 5 is numeric, so uses ::numeric; param is at offset 2+0+1 = $3
+        assert!(sql.contains("$3"), "score param should be $3, got: {sql}");
+        assert_eq!(params.len(), 1);
+    }
+
+    // --- $contains / $containsAny / $containsAll ---
+
+    #[test]
+    fn contains_string_basic() {
+        let (sql, params) =
+            translate_filter(&json!({"authors": {"$contains": "Cortex Team"}}), 0).unwrap();
+        assert!(
+            sql.contains("metadata->'authors'") && sql.contains("@>"),
+            "got: {sql}"
+        );
+        assert!(sql.contains(r#"["Cortex Team"]"#), "got: {sql}");
+        assert!(params.is_empty());
+    }
+
+    #[test]
+    fn contains_numeric() {
+        let (sql, params) = translate_filter(&json!({"ratings": {"$contains": 5}}), 0).unwrap();
+        assert!(sql.contains("[5]"), "got: {sql}");
+        assert!(params.is_empty());
+    }
+
+    #[test]
+    fn contains_bool() {
+        let (sql, _) = translate_filter(&json!({"flags": {"$contains": true}}), 0).unwrap();
+        assert!(sql.contains("[true]"), "got: {sql}");
+    }
+
+    #[test]
+    fn contains_rejects_object_element() {
+        let r = translate_filter(&json!({"tags": {"$contains": {"a": 1}}}), 0);
+        assert!(matches!(r, Err(FilterError::Malformed(_))));
+    }
+
+    #[test]
+    fn contains_rejects_array_element() {
+        let r = translate_filter(&json!({"tags": {"$contains": ["a"]}}), 0);
+        assert!(matches!(r, Err(FilterError::Malformed(_))));
+    }
+
+    #[test]
+    fn contains_rejects_null() {
+        let r = translate_filter(&json!({"tags": {"$contains": null}}), 0);
+        assert!(matches!(r, Err(FilterError::Malformed(_))));
+    }
+
+    #[test]
+    fn contains_single_quote_escaped() {
+        let (sql, _) = translate_filter(&json!({"authors": {"$contains": "O'Brien"}}), 0).unwrap();
+        assert!(
+            sql.contains("O''Brien"),
+            "single quote must be escaped, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn contains_nested_field() {
+        let (sql, _) = translate_filter(&json!({"meta.tags": {"$contains": "rag"}}), 0).unwrap();
+        assert!(sql.contains("metadata->'meta'->'tags'"), "got: {sql}");
+    }
+
+    #[test]
+    fn contains_any_basic() {
+        let (sql, params) = translate_filter(
+            &json!({"authors": {"$containsAny": ["Cortex Team", "Lewis"]}}),
+            0,
+        )
+        .unwrap();
+        assert!(sql.contains(r#"["Cortex Team"]"#) && sql.contains(r#"["Lewis"]"#));
+        assert!(sql.contains(" OR "), "got: {sql}");
+        assert!(params.is_empty());
+    }
+
+    #[test]
+    fn contains_any_empty_errors() {
+        let r = translate_filter(&json!({"tags": {"$containsAny": []}}), 0);
+        assert!(matches!(r, Err(FilterError::Malformed(_))));
+    }
+
+    #[test]
+    fn contains_any_non_array_errors() {
+        let r = translate_filter(&json!({"tags": {"$containsAny": "x"}}), 0);
+        assert!(matches!(r, Err(FilterError::Malformed(_))));
+    }
+
+    #[test]
+    fn contains_any_rejects_non_scalar_element() {
+        let r = translate_filter(&json!({"tags": {"$containsAny": ["x", {"a": 1}]}}), 0);
+        assert!(matches!(r, Err(FilterError::Malformed(_))));
+    }
+
+    #[test]
+    fn contains_all_basic() {
+        let (sql, params) = translate_filter(
+            &json!({"authors": {"$containsAll": ["Smith", "Johnson"]}}),
+            0,
+        )
+        .unwrap();
+        // Single containment check with the full array
+        assert!(sql.contains(r#"["Smith","Johnson"]"#), "got: {sql}");
+        assert!(
+            !sql.contains(" OR "),
+            "containsAll is one check, got: {sql}"
+        );
+        assert!(params.is_empty());
+    }
+
+    #[test]
+    fn contains_all_empty_errors() {
+        let r = translate_filter(&json!({"tags": {"$containsAll": []}}), 0);
+        assert!(matches!(r, Err(FilterError::Malformed(_))));
+    }
+
+    #[test]
+    fn contains_all_rejects_non_scalar_element() {
+        let r = translate_filter(&json!({"tags": {"$containsAll": ["x", ["nested"]]}}), 0);
+        assert!(matches!(r, Err(FilterError::Malformed(_))));
+    }
+
+    #[test]
+    fn contains_does_not_perturb_param_offset() {
+        let (sql, params) = translate_filter(
+            &json!({"$and": [
+                {"authors": {"$contains": "Cortex Team"}},
+                {"score": {"$gte": 5}}
+            ]}),
+            2,
+        )
+        .unwrap();
+        // $gte 5 is numeric; param should be at $3 (offset 2 + 0 inlined + 1)
         assert!(sql.contains("$3"), "score param should be $3, got: {sql}");
         assert_eq!(params.len(), 1);
     }

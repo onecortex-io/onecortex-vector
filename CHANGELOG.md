@@ -4,6 +4,19 @@ All notable changes to onecortex-vector are documented here. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — Unreleased
+
+### Added
+
+- **`$contains`, `$containsAny`, `$containsAll` metadata filter
+  operators** for fields whose value is an array of scalars (strings,
+  numbers, booleans). Closes a gap that previously forced users to
+  denormalize tags/authors/labels into delimited strings or filter
+  client-side. `$contains` takes a scalar; `$containsAny` and
+  `$containsAll` take a non-empty array of scalars and reject nested
+  objects/arrays. `$elemMatch` remains the operator for arrays of
+  objects. See `docs/filters.md` for the full DSL.
+
 ## [0.2.1] — 2026-05-01
 
 ### Fixed
