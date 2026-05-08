@@ -16,10 +16,27 @@ pub async fn start_test_server() -> TestServer {
         .unwrap();
 
     let reranker = onecortex_vector::planner::reranker::build_reranker(&config);
+    let embedder_factory = std::sync::Arc::new(onecortex_vector::embedding::EmbedderFactory::new(
+        onecortex_vector::embedding::EmbedderFactoryConfig {
+            openai_api_key: config.embed_openai_api_key.clone(),
+            voyage_api_key: config.embed_voyage_api_key.clone(),
+            cohere_api_key: config.embed_cohere_api_key.clone(),
+            jina_api_key: config.embed_jina_api_key.clone(),
+            tei_url: config.embed_tei_url.clone(),
+            http_timeout_secs: config.embed_http_timeout_secs,
+            max_retries: config.embed_max_retries,
+        },
+    ));
+    let embed_cache = std::sync::Arc::new(onecortex_vector::embedding::QueryEmbedCache::new(
+        config.embed_query_cache_capacity,
+        config.embed_query_cache_ttl_secs,
+    ));
     let state = onecortex_vector::state::AppState {
         pool: pool.clone(),
         config: config.clone(),
         reranker,
+        embedder_factory,
+        embed_cache,
     };
 
     let router = onecortex_vector::with_observability(build_test_router(state));

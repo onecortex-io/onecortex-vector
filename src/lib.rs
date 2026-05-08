@@ -1,7 +1,9 @@
 pub mod config;
 pub mod db;
+pub mod embedding;
 pub mod error;
 pub mod handlers;
+pub mod http_retry;
 pub mod middleware;
 pub mod planner;
 pub mod state;

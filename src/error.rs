@@ -27,6 +27,13 @@ pub enum ErrorCode {
     RerankerTimeout,
     RerankerConfig,
     RerankerUpstream,
+    EmbedderConfig,
+    EmbedderUpstream,
+    EmbedderRateLimited,
+    EmbedderTimeout,
+    EmbedderDimensionMismatch,
+    TextRequired,
+    ValuesAndTextConflict,
 }
 
 impl ErrorCode {
@@ -51,6 +58,13 @@ impl ErrorCode {
             ErrorCode::RerankerTimeout => "RERANKER_TIMEOUT",
             ErrorCode::RerankerConfig => "RERANKER_CONFIG",
             ErrorCode::RerankerUpstream => "RERANKER_UPSTREAM",
+            ErrorCode::EmbedderConfig => "EMBEDDER_CONFIG",
+            ErrorCode::EmbedderUpstream => "EMBEDDER_UPSTREAM",
+            ErrorCode::EmbedderRateLimited => "EMBEDDER_RATE_LIMITED",
+            ErrorCode::EmbedderTimeout => "EMBEDDER_TIMEOUT",
+            ErrorCode::EmbedderDimensionMismatch => "EMBEDDER_DIMENSION_MISMATCH",
+            ErrorCode::TextRequired => "TEXT_REQUIRED",
+            ErrorCode::ValuesAndTextConflict => "VALUES_AND_TEXT_CONFLICT",
         }
     }
 }
@@ -143,6 +157,60 @@ impl From<crate::planner::reranker::RerankerError> for ApiError {
                 message: format!("reranker is not configured correctly: {message}"),
                 details: None,
             },
+        }
+    }
+}
+
+impl From<crate::embedding::EmbedderError> for ApiError {
+    fn from(err: crate::embedding::EmbedderError) -> Self {
+        use crate::embedding::EmbedderError;
+        use crate::http_retry::HttpKind;
+        match err {
+            EmbedderError::RateLimited(retries) => ApiError::Upstream {
+                status: StatusCode::TOO_MANY_REQUESTS,
+                code: ErrorCode::EmbedderRateLimited,
+                message: format!("embedder upstream rate limited after {retries} retries"),
+                details: Some(serde_json::json!({ "retries": retries })),
+            },
+            EmbedderError::Http {
+                kind: HttpKind::Timeout,
+                message,
+            } => ApiError::Upstream {
+                status: StatusCode::GATEWAY_TIMEOUT,
+                code: ErrorCode::EmbedderTimeout,
+                message: format!("embedder upstream timed out: {message}"),
+                details: Some(serde_json::json!({ "kind": "timeout" })),
+            },
+            EmbedderError::Http { kind, message } => {
+                let details = match &kind {
+                    HttpKind::Status(s) => {
+                        serde_json::json!({ "kind": "status", "upstreamStatus": s })
+                    }
+                    HttpKind::Connect => serde_json::json!({ "kind": "connect" }),
+                    HttpKind::Other => serde_json::json!({ "kind": "other" }),
+                    HttpKind::Timeout => unreachable!(),
+                };
+                ApiError::Upstream {
+                    status: StatusCode::BAD_GATEWAY,
+                    code: ErrorCode::EmbedderUpstream,
+                    message: format!("embedder upstream error: {message}"),
+                    details: Some(details),
+                }
+            }
+            EmbedderError::Parse(message) => ApiError::Upstream {
+                status: StatusCode::BAD_GATEWAY,
+                code: ErrorCode::EmbedderUpstream,
+                message: format!("embedder upstream returned an unparseable response: {message}"),
+                details: Some(serde_json::json!({ "kind": "parse" })),
+            },
+            EmbedderError::Config(message) => ApiError::BadRequest {
+                code: ErrorCode::EmbedderConfig,
+                message,
+                details: None,
+            },
+            EmbedderError::DimensionMismatch { expected, got } => {
+                ApiError::embedder_dimension_mismatch(expected, got)
+            }
         }
     }
 }
@@ -290,6 +358,60 @@ impl ApiError {
             code: ErrorCode::CollectionAlreadyExists,
             message: format!("collection '{name}' already exists"),
             details: Some(serde_json::json!({ "collection": name })),
+        }
+    }
+
+    pub fn embedder_dimension_mismatch(expected: usize, got: usize) -> Self {
+        ApiError::BadRequest {
+            code: ErrorCode::EmbedderDimensionMismatch,
+            message: format!(
+                "embedder returned {got}-dimensional vectors but collection expects {expected}"
+            ),
+            details: Some(serde_json::json!({ "expected": expected, "got": got })),
+        }
+    }
+
+    pub fn text_required(record_id: Option<&str>) -> Self {
+        let message = match record_id {
+            Some(id) => format!(
+                "record '{id}' has no values; collection has a bound embedder but no text was provided"
+            ),
+            None => "request has no vector and collection has a bound embedder but no text was provided".to_string(),
+        };
+        let details = match record_id {
+            Some(id) => serde_json::json!({ "recordId": id }),
+            None => serde_json::json!({}),
+        };
+        ApiError::BadRequest {
+            code: ErrorCode::TextRequired,
+            message,
+            details: Some(details),
+        }
+    }
+
+    pub fn values_and_text_conflict(record_id: Option<&str>) -> Self {
+        let message = match record_id {
+            Some(id) => format!("record '{id}' provided both 'values' and 'text'; choose one"),
+            None => "query provided both 'vector'/'id' and 'text'; choose one".to_string(),
+        };
+        let details = match record_id {
+            Some(id) => serde_json::json!({ "recordId": id }),
+            None => serde_json::json!({}),
+        };
+        ApiError::BadRequest {
+            code: ErrorCode::ValuesAndTextConflict,
+            message,
+            details: Some(details),
+        }
+    }
+
+    pub fn embedder_not_configured() -> Self {
+        ApiError::BadRequest {
+            code: ErrorCode::EmbedderConfig,
+            message:
+                "collection has no bound embedder; provide 'values' (or 'vector'/'id') instead of 'text'"
+                    .to_string(),
+            details: None,
         }
     }
 }
@@ -542,6 +664,47 @@ mod tests {
         assert_eq!(status, StatusCode::BAD_GATEWAY);
         assert_eq!(body["error"]["code"], "RERANKER_UPSTREAM");
         assert_eq!(body["error"]["details"]["kind"], "parse");
+    }
+
+    #[tokio::test]
+    async fn embedder_rate_limited_maps_to_429() {
+        use crate::embedding::EmbedderError;
+        let (status, body) = render(EmbedderError::RateLimited(2).into()).await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(body["error"]["code"], "EMBEDDER_RATE_LIMITED");
+        assert_eq!(body["error"]["details"]["retries"], 2);
+    }
+
+    #[tokio::test]
+    async fn embedder_config_maps_to_400() {
+        use crate::embedding::EmbedderError;
+        let (status, body) = render(EmbedderError::Config("missing key".to_string()).into()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"]["code"], "EMBEDDER_CONFIG");
+    }
+
+    #[tokio::test]
+    async fn embedder_dimension_mismatch_builder() {
+        let (status, body) = render(ApiError::embedder_dimension_mismatch(1536, 768)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"]["code"], "EMBEDDER_DIMENSION_MISMATCH");
+        assert_eq!(body["error"]["details"]["expected"], 1536);
+        assert_eq!(body["error"]["details"]["got"], 768);
+    }
+
+    #[tokio::test]
+    async fn values_and_text_conflict_builder() {
+        let (status, body) = render(ApiError::values_and_text_conflict(Some("r1"))).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"]["code"], "VALUES_AND_TEXT_CONFLICT");
+        assert_eq!(body["error"]["details"]["recordId"], "r1");
+    }
+
+    #[tokio::test]
+    async fn text_required_builder() {
+        let (status, body) = render(ApiError::text_required(None)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"]["code"], "TEXT_REQUIRED");
     }
 
     #[tokio::test]

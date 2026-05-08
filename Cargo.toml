@@ -43,9 +43,14 @@ prometheus = { version = "0.13", features = ["process"] }
 thiserror = "1"
 anyhow = "1"
 
-# HTTP client (reranker backends)
+# HTTP client (reranker + embedder backends)
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 async-trait = "0.1"
+
+# In-memory cache for query-side embeddings
+moka = { version = "0.12", features = ["future"] }
+# Concurrent map (lazy embedder factory memoization)
+dashmap = "6"
 
 [profile.release]
 strip = true

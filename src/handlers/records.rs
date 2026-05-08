@@ -1,4 +1,8 @@
-use crate::{error::ApiError, state::AppState};
+use crate::{
+    embedding::{embed_in_batches, EmbedInputType, EmbedderConfig},
+    error::ApiError,
+    state::AppState,
+};
 use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
@@ -9,6 +13,7 @@ pub struct CollectionMeta {
     pub dimension: i32,
     pub metric: String,
     pub bm25_enabled: bool,
+    pub embedder_config: Option<EmbedderConfig>,
 }
 
 impl CollectionMeta {
@@ -27,7 +32,7 @@ pub async fn resolve_collection(
     // `status = 'ready'` here so we can distinguish "does not exist" from
     // "exists but not yet ready" and surface the latter as INDEX_NOT_READY.
     let row = sqlx::query(
-        "SELECT id, dimension, metric, bm25_enabled, status \
+        "SELECT id, dimension, metric, bm25_enabled, status, embedder_config \
          FROM _onecortex_vector.collections WHERE name = $1",
     )
     .bind(name)
@@ -44,12 +49,13 @@ pub async fn resolve_collection(
             dimension: row.get("dimension"),
             metric: row.get("metric"),
             bm25_enabled: row.get("bm25_enabled"),
+            embedder_config: parse_embedder_config(row.get("embedder_config")),
         });
     }
 
     // Fall back to alias resolution: alias -> collection_name -> collection record.
     let alias_row = sqlx::query(
-        "SELECT i.id, i.dimension, i.metric, i.bm25_enabled, i.status \
+        "SELECT i.id, i.dimension, i.metric, i.bm25_enabled, i.status, i.embedder_config \
          FROM _onecortex_vector.aliases a \
          JOIN _onecortex_vector.collections i ON a.collection_name = i.name \
          WHERE a.alias = $1",
@@ -69,7 +75,12 @@ pub async fn resolve_collection(
         dimension: alias_row.get("dimension"),
         metric: alias_row.get("metric"),
         bm25_enabled: alias_row.get("bm25_enabled"),
+        embedder_config: parse_embedder_config(alias_row.get("embedder_config")),
     })
+}
+
+fn parse_embedder_config(raw: Option<serde_json::Value>) -> Option<EmbedderConfig> {
+    raw.and_then(|v| serde_json::from_value(v).ok())
 }
 
 // --- Upsert ---
@@ -85,7 +96,10 @@ pub struct UpsertRequest {
 #[serde(rename_all = "camelCase")]
 pub struct RecordInput {
     pub id: String,
-    pub values: Vec<f32>,
+    /// Pre-computed dense vector. Mutually exclusive with `text`.
+    /// Either `values` or `text` (when collection has a bound embedder) is required.
+    #[serde(default)]
+    pub values: Option<Vec<f32>>,
     pub sparse_values: Option<serde_json::Value>,
     pub metadata: Option<serde_json::Value>,
     pub text: Option<String>,
@@ -114,8 +128,18 @@ pub async fn upsert_records(
 
     let collection = resolve_collection(&state.pool, &collection_name).await?;
     let namespace = req.namespace.unwrap_or_default();
+    let dimension = collection.dimension as usize;
 
-    // Validate all IDs and dimensions before any DB writes
+    // Validate per-record. Behaviour depends on whether the collection has a
+    // bound embedder:
+    //
+    //   No embedder bound (legacy): `values` is required; `text` is optional
+    //   BM25 content stored in `text_content`. Both together is fine.
+    //
+    //   Embedder bound: caller picks ONE source of the vector — `values`
+    //   directly OR `text` (server embeds). Both together is a conflict
+    //   (avoid silent precedence bugs).
+    let has_embedder = collection.embedder_config.is_some();
     for r in &req.records {
         if r.id.len() > 512 {
             return Err(ApiError::invalid_argument(format!(
@@ -123,15 +147,29 @@ pub async fn upsert_records(
                 &r.id[..20.min(r.id.len())]
             )));
         }
-        if r.values.len() != collection.dimension as usize {
-            return Err(ApiError::dimension_mismatch(
-                Some(&r.id),
-                collection.dimension as usize,
-                r.values.len(),
-            ));
-        }
         if r.sparse_values.is_some() {
             return Err(ApiError::sparse_not_supported(&r.id));
+        }
+        match (&r.values, &r.text, has_embedder) {
+            (Some(v), text_opt, _) => {
+                if v.len() != dimension {
+                    return Err(ApiError::dimension_mismatch(
+                        Some(&r.id),
+                        dimension,
+                        v.len(),
+                    ));
+                }
+                if text_opt.is_some() && has_embedder {
+                    return Err(ApiError::values_and_text_conflict(Some(&r.id)));
+                }
+            }
+            (None, Some(_), true) => { /* will embed below */ }
+            (None, Some(_), false) => {
+                return Err(ApiError::text_required(Some(&r.id)));
+            }
+            (None, None, _) => {
+                return Err(ApiError::text_required(Some(&r.id)));
+            }
         }
     }
 
@@ -141,6 +179,8 @@ pub async fn upsert_records(
     // ids in the request before issuing the SQL. namespace is request-scoped
     // (one per body), so id alone is sufficient. Order is preserved by the
     // index of each id's last occurrence.
+    //
+    // We also dedupe BEFORE embedding so we never embed a payload twice.
     let deduped: Vec<&RecordInput> = {
         let mut last_idx: HashMap<&str, usize> = HashMap::with_capacity(req.records.len());
         for (i, r) in req.records.iter().enumerate() {
@@ -161,6 +201,46 @@ pub async fn upsert_records(
         );
     }
 
+    // If any deduped record relies on server-side embedding, embed all such
+    // texts in one batched call (chunked by the provider's max_batch).
+    // Map (record index in `deduped`) -> resolved Vec<f32>.
+    let mut embedded_values: HashMap<usize, Vec<f32>> = HashMap::new();
+    if let Some(ec) = &collection.embedder_config {
+        let mut to_embed_indices: Vec<usize> = Vec::new();
+        let mut to_embed_texts: Vec<String> = Vec::new();
+        for (i, r) in deduped.iter().enumerate() {
+            if r.values.is_none() {
+                if let Some(t) = &r.text {
+                    to_embed_indices.push(i);
+                    to_embed_texts.push(t.clone());
+                }
+            }
+        }
+        if !to_embed_indices.is_empty() {
+            let embedder = state
+                .embedder_factory
+                .for_config(ec)
+                .map_err(ApiError::from)?;
+            let vectors =
+                embed_in_batches(embedder.as_ref(), &to_embed_texts, EmbedInputType::Document)
+                    .await
+                    .map_err(ApiError::from)?;
+            if vectors.len() != to_embed_indices.len() {
+                return Err(ApiError::Internal(anyhow::anyhow!(
+                    "embedder returned {} vectors for {} inputs",
+                    vectors.len(),
+                    to_embed_indices.len()
+                )));
+            }
+            for (idx, vec) in to_embed_indices.into_iter().zip(vectors.into_iter()) {
+                if vec.len() != dimension {
+                    return Err(ApiError::embedder_dimension_mismatch(dimension, vec.len()));
+                }
+                embedded_values.insert(idx, vec);
+            }
+        }
+    }
+
     let table = collection.table_ref();
     let upsert_sql = format!(
         "INSERT INTO {table} (id, namespace, values, text_content, metadata, updated_at) VALUES "
@@ -168,10 +248,17 @@ pub async fn upsert_records(
 
     let mut qb = sqlx::QueryBuilder::new(upsert_sql);
     let mut sep = qb.separated(", ");
-    for r in &deduped {
+    for (i, r) in deduped.iter().enumerate() {
+        let values_ref: &Vec<f32> = if let Some(v) = &r.values {
+            v
+        } else {
+            embedded_values
+                .get(&i)
+                .expect("validation should have rejected records with no values and no text")
+        };
         let embedding_str = format!(
             "[{}]",
-            r.values
+            values_ref
                 .iter()
                 .map(|f| f.to_string())
                 .collect::<Vec<_>>()

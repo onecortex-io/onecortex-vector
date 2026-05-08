@@ -75,6 +75,26 @@ pub struct AppConfig {
     pub rerank_http_timeout_secs: u64,
     /// Max retry attempts on 429 (rate limit). Default: 3. Applies to cloud backends only.
     pub rerank_max_retries: u32,
+
+    // ── Server-side embeddings (F1) ───────────────────────────────────────────
+    // Embedders are bound *per collection* (not globally). API keys are loaded
+    // here once at startup and shared across all collections that use the same
+    // backend. A backend with no key set will reject any collection that tries
+    // to use it with EMBEDDER_CONFIG.
+    pub embed_openai_api_key: Option<String>,
+    pub embed_voyage_api_key: Option<String>,
+    pub embed_cohere_api_key: Option<String>,
+    pub embed_jina_api_key: Option<String>,
+    /// Base URL for self-hosted HuggingFace TEI (e.g. "http://tei:8080").
+    pub embed_tei_url: Option<String>,
+    /// Timeout in seconds for embedder HTTP calls. Default: 30.
+    pub embed_http_timeout_secs: u64,
+    /// Max retry attempts on 429 (rate limit). Default: 3.
+    pub embed_max_retries: u32,
+    /// Query-side embedding LRU capacity. Default: 10_000 entries.
+    pub embed_query_cache_capacity: u64,
+    /// Query-side embedding LRU TTL. Default: 60 seconds.
+    pub embed_query_cache_ttl_secs: u64,
 }
 
 impl AppConfig {
@@ -126,6 +146,32 @@ impl AppConfig {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(3),
+
+            embed_openai_api_key: std::env::var("ONECORTEX_VECTOR_EMBED_OPENAI_API_KEY").ok(),
+            embed_voyage_api_key: std::env::var("ONECORTEX_VECTOR_EMBED_VOYAGE_API_KEY").ok(),
+            embed_cohere_api_key: std::env::var("ONECORTEX_VECTOR_EMBED_COHERE_API_KEY").ok(),
+            embed_jina_api_key: std::env::var("ONECORTEX_VECTOR_EMBED_JINA_API_KEY").ok(),
+            embed_tei_url: std::env::var("ONECORTEX_VECTOR_EMBED_TEI_URL").ok(),
+            embed_http_timeout_secs: std::env::var("ONECORTEX_VECTOR_EMBED_HTTP_TIMEOUT_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(30),
+            embed_max_retries: std::env::var("ONECORTEX_VECTOR_EMBED_MAX_RETRIES")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(3),
+            embed_query_cache_capacity: std::env::var(
+                "ONECORTEX_VECTOR_EMBED_QUERY_CACHE_CAPACITY",
+            )
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(10_000),
+            embed_query_cache_ttl_secs: std::env::var(
+                "ONECORTEX_VECTOR_EMBED_QUERY_CACHE_TTL_SECS",
+            )
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(60),
         })
     }
 }
@@ -170,6 +216,15 @@ mod tests {
         std::env::remove_var("ONECORTEX_VECTOR_RERANK_CROSS_ENCODER_URL");
         std::env::remove_var("ONECORTEX_VECTOR_RERANK_HTTP_TIMEOUT_SECS");
         std::env::remove_var("ONECORTEX_VECTOR_RERANK_MAX_RETRIES");
+        std::env::remove_var("ONECORTEX_VECTOR_EMBED_OPENAI_API_KEY");
+        std::env::remove_var("ONECORTEX_VECTOR_EMBED_VOYAGE_API_KEY");
+        std::env::remove_var("ONECORTEX_VECTOR_EMBED_COHERE_API_KEY");
+        std::env::remove_var("ONECORTEX_VECTOR_EMBED_JINA_API_KEY");
+        std::env::remove_var("ONECORTEX_VECTOR_EMBED_TEI_URL");
+        std::env::remove_var("ONECORTEX_VECTOR_EMBED_HTTP_TIMEOUT_SECS");
+        std::env::remove_var("ONECORTEX_VECTOR_EMBED_MAX_RETRIES");
+        std::env::remove_var("ONECORTEX_VECTOR_EMBED_QUERY_CACHE_CAPACITY");
+        std::env::remove_var("ONECORTEX_VECTOR_EMBED_QUERY_CACHE_TTL_SECS");
 
         let config = AppConfig::from_env().unwrap();
         assert_eq!(config.api_port, 8080);
@@ -189,5 +244,14 @@ mod tests {
         assert!(config.rerank_cross_encoder_url.is_none());
         assert_eq!(config.rerank_http_timeout_secs, 30);
         assert_eq!(config.rerank_max_retries, 3);
+        assert!(config.embed_openai_api_key.is_none());
+        assert!(config.embed_voyage_api_key.is_none());
+        assert!(config.embed_cohere_api_key.is_none());
+        assert!(config.embed_jina_api_key.is_none());
+        assert!(config.embed_tei_url.is_none());
+        assert_eq!(config.embed_http_timeout_secs, 30);
+        assert_eq!(config.embed_max_retries, 3);
+        assert_eq!(config.embed_query_cache_capacity, 10_000);
+        assert_eq!(config.embed_query_cache_ttl_secs, 60);
     }
 }

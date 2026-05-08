@@ -6,7 +6,8 @@ use std::net::SocketAddr;
 
 // The library crate (src/lib.rs) is the canonical home for these modules.
 // The binary re-uses them via the `onecortex_vector` crate name.
-use onecortex_vector::{config, db, handlers, planner, state, with_observability};
+use onecortex_vector::{config, db, embedding, handlers, planner, state, with_observability};
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
@@ -25,10 +26,28 @@ async fn main() {
 
     let reranker = planner::reranker::build_reranker(&config);
 
+    let embedder_factory = Arc::new(embedding::EmbedderFactory::new(
+        embedding::EmbedderFactoryConfig {
+            openai_api_key: config.embed_openai_api_key.clone(),
+            voyage_api_key: config.embed_voyage_api_key.clone(),
+            cohere_api_key: config.embed_cohere_api_key.clone(),
+            jina_api_key: config.embed_jina_api_key.clone(),
+            tei_url: config.embed_tei_url.clone(),
+            http_timeout_secs: config.embed_http_timeout_secs,
+            max_retries: config.embed_max_retries,
+        },
+    ));
+    let embed_cache = Arc::new(embedding::QueryEmbedCache::new(
+        config.embed_query_cache_capacity,
+        config.embed_query_cache_ttl_secs,
+    ));
+
     let state = state::AppState {
         pool,
         config: config.clone(),
         reranker,
+        embedder_factory,
+        embed_cache,
     };
 
     // Public API router -- all endpoints except /metrics

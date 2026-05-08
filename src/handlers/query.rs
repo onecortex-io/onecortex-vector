@@ -1,7 +1,16 @@
-use crate::{error::ApiError, planner::reranker::RerankCandidate, state::AppState};
-use axum::{extract::State, Json};
+use crate::{
+    embedding::{EmbedInputType, QueryEmbedCache},
+    error::ApiError,
+    planner::reranker::RerankCandidate,
+    state::AppState,
+};
+use axum::{
+    extract::{Query as AxumQuery, State},
+    Json,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
+use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +38,9 @@ fn default_rank_field() -> String {
 pub struct QueryRequest {
     pub vector: Option<Vec<f32>>,
     pub id: Option<String>,
+    /// Natural-language query text. Embedded server-side via the collection's
+    /// bound embedder. Mutually exclusive with `vector` and `id`.
+    pub text: Option<String>,
     pub top_k: i64,
     pub namespace: Option<String>,
     pub filter: Option<serde_json::Value>,
@@ -39,6 +51,15 @@ pub struct QueryRequest {
     pub rerank: Option<RerankOptions>,
     pub score_threshold: Option<f64>,
     pub group_by: Option<GroupByOptions>,
+}
+
+/// Query-string options accepted alongside the JSON body.
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct QueryParams {
+    /// Bypass the query-side embedding LRU. Only relevant when `text` is used.
+    #[serde(default)]
+    pub no_cache: bool,
 }
 
 #[derive(Deserialize, Clone)]
@@ -103,10 +124,47 @@ pub struct BatchQueryResponse {
     pub results: Vec<serde_json::Value>,
 }
 
+/// Embed a query text via the bound embedder, hitting (and populating) the
+/// shared LRU cache unless `no_cache` is true.
+async fn embed_query_text(
+    factory: &Arc<crate::embedding::EmbedderFactory>,
+    cache: &Arc<QueryEmbedCache>,
+    ec: &crate::embedding::EmbedderConfig,
+    text: &str,
+    no_cache: bool,
+) -> Result<Arc<Vec<f32>>, ApiError> {
+    let embedder = factory.for_config(ec).map_err(ApiError::from)?;
+    if no_cache {
+        let mut vectors = embedder
+            .embed(&[text.to_string()], EmbedInputType::Query)
+            .await
+            .map_err(ApiError::from)?;
+        let v = vectors.pop().ok_or_else(|| {
+            ApiError::Internal(anyhow::anyhow!("embedder returned empty result for query"))
+        })?;
+        return Ok(Arc::new(v));
+    }
+    let key = QueryEmbedCache::make_key(embedder.backend(), embedder.model(), text);
+    if let Some(hit) = cache.get(&key).await {
+        return Ok(hit);
+    }
+    let mut vectors = embedder
+        .embed(&[text.to_string()], EmbedInputType::Query)
+        .await
+        .map_err(ApiError::from)?;
+    let v = vectors.pop().ok_or_else(|| {
+        ApiError::Internal(anyhow::anyhow!("embedder returned empty result for query"))
+    })?;
+    let arc = Arc::new(v);
+    cache.insert(key, arc.clone()).await;
+    Ok(arc)
+}
+
 /// POST /collections/:name/query
 pub async fn query_vectors(
     State(state): State<AppState>,
     axum::extract::Path(collection_name): axum::extract::Path<String>,
+    AxumQuery(params): AxumQuery<QueryParams>,
     Json(req): Json<QueryRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     if req.top_k < 1 || req.top_k > 10_000 {
@@ -143,7 +201,14 @@ pub async fn query_vectors(
         crate::handlers::records::resolve_collection(&state.pool, &collection_name).await?;
     let namespace = req.namespace.clone().unwrap_or_default();
 
-    // Resolve query vector -- either directly provided or looked up by ID
+    // Resolve query vector — exactly one of `vector`, `id`, or `text` (server-side embed).
+    let inputs_set = [req.vector.is_some(), req.id.is_some(), req.text.is_some()]
+        .iter()
+        .filter(|b| **b)
+        .count();
+    if inputs_set > 1 {
+        return Err(ApiError::values_and_text_conflict(None));
+    }
     let query_vec = if let Some(vec) = &req.vector {
         vec.clone()
     } else if let Some(id) = &req.id {
@@ -157,9 +222,29 @@ pub async fn query_vectors(
         .await?
         .ok_or_else(|| ApiError::not_found(format!("Record '{id}' not found.")))?;
         crate::handlers::records::parse_pgvector_str(&row.get::<String, _>("values"))
+    } else if let Some(text) = &req.text {
+        let ec = collection
+            .embedder_config
+            .as_ref()
+            .ok_or_else(ApiError::embedder_not_configured)?;
+        let vec_arc = embed_query_text(
+            &state.embedder_factory,
+            &state.embed_cache,
+            ec,
+            text,
+            params.no_cache,
+        )
+        .await?;
+        if vec_arc.len() != collection.dimension as usize {
+            return Err(ApiError::embedder_dimension_mismatch(
+                collection.dimension as usize,
+                vec_arc.len(),
+            ));
+        }
+        (*vec_arc).clone()
     } else {
         return Err(ApiError::invalid_argument(
-            "Provide either 'vector' or 'id'".to_string(),
+            "Provide one of 'vector', 'id', or 'text'".to_string(),
         ));
     };
 
@@ -534,7 +619,13 @@ pub async fn query_batch(
         let s = state.clone();
         let name = collection_name.clone();
         handles.push(tokio::spawn(async move {
-            query_vectors(State(s), axum::extract::Path(name), Json(single_req)).await
+            query_vectors(
+                State(s),
+                axum::extract::Path(name),
+                AxumQuery(QueryParams::default()),
+                Json(single_req),
+            )
+            .await
         }));
     }
 

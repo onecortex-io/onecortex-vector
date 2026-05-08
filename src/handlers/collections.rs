@@ -1,4 +1,8 @@
-use crate::{error::ApiError, state::AppState};
+use crate::{
+    embedding::{EmbedInputType, EmbedderConfig},
+    error::ApiError,
+    state::AppState,
+};
 use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
@@ -14,6 +18,9 @@ pub struct CreateCollectionRequest {
     pub bm25_enabled: Option<bool>,
     pub deletion_protected: Option<bool>,
     pub tags: Option<serde_json::Value>,
+    /// Optional server-side embedder. When set, callers may send `text`
+    /// instead of `values` on upsert/query. API keys live in env vars.
+    pub embedder: Option<EmbedderConfig>,
 }
 
 fn default_metric() -> String {
@@ -41,6 +48,8 @@ pub struct CollectionResponse {
     pub deletion_protected: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedder: Option<EmbedderConfig>,
 }
 
 #[derive(Serialize)]
@@ -110,12 +119,38 @@ pub async fn create_collection(
     let bm25_enabled = req.bm25_enabled.unwrap_or(false);
     let deletion_protected = req.deletion_protected.unwrap_or(false);
 
+    // Preflight: if an embedder is bound, build it and verify the model's
+    // output dimension matches the requested dimension. Catches misconfigured
+    // collections at create time rather than first upsert.
+    let embedder_config_json: Option<serde_json::Value> = if let Some(ec) = &req.embedder {
+        let embedder = state
+            .embedder_factory
+            .for_config(ec)
+            .map_err(ApiError::from)?;
+        let probe = embedder
+            .embed(&["x".to_string()], EmbedInputType::Document)
+            .await
+            .map_err(ApiError::from)?;
+        let probe_dim = probe.first().map(|v| v.len()).unwrap_or(0);
+        if probe_dim != req.dimension as usize {
+            return Err(ApiError::embedder_dimension_mismatch(
+                req.dimension as usize,
+                probe_dim,
+            ));
+        }
+        Some(serde_json::to_value(ec).map_err(|e| {
+            ApiError::Internal(anyhow::anyhow!("failed to serialize embedder config: {e}"))
+        })?)
+    } else {
+        None
+    };
+
     // Insert into catalog -- unique constraint on name gives us 409 on duplicate
     let insert_result = sqlx::query(
         r#"
         INSERT INTO _onecortex_vector.collections
-            (id, name, dimension, metric, bm25_enabled, deletion_protected, tags)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+            (id, name, dimension, metric, bm25_enabled, deletion_protected, tags, embedder_config)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         "#,
     )
     .bind(collection_id)
@@ -125,6 +160,7 @@ pub async fn create_collection(
     .bind(bm25_enabled)
     .bind(deletion_protected)
     .bind(&req.tags)
+    .bind(&embedder_config_json)
     .execute(&state.pool)
     .await;
 
@@ -165,8 +201,21 @@ pub async fn create_collection(
             bm25_enabled,
             deletion_protected,
             tags: req.tags,
+            embedder: req.embedder,
         }),
     ))
+}
+
+/// Decode an `embedder_config` JSONB row value into the typed [`EmbedderConfig`].
+/// Returns None for NULL or for legacy rows that fail to deserialize (logged).
+fn decode_embedder_config(raw: Option<serde_json::Value>) -> Option<EmbedderConfig> {
+    raw.and_then(|v| match serde_json::from_value(v) {
+        Ok(cfg) => Some(cfg),
+        Err(e) => {
+            tracing::warn!(error = %e, "ignoring unparseable embedder_config in collections row");
+            None
+        }
+    })
 }
 
 /// GET /collections
@@ -174,7 +223,7 @@ pub async fn list_collections(
     State(state): State<AppState>,
 ) -> Result<Json<CollectionListResponse>, ApiError> {
     let rows = sqlx::query(
-        "SELECT name, dimension, metric, status, bm25_enabled, deletion_protected, tags FROM _onecortex_vector.collections ORDER BY created_at"
+        "SELECT name, dimension, metric, status, bm25_enabled, deletion_protected, tags, embedder_config FROM _onecortex_vector.collections ORDER BY created_at"
     )
     .fetch_all(&state.pool)
     .await?;
@@ -191,6 +240,7 @@ pub async fn list_collections(
             let bm25_enabled: bool = r.get("bm25_enabled");
             let deletion_protected: bool = r.get("deletion_protected");
             let tags: Option<serde_json::Value> = r.get("tags");
+            let embedder = decode_embedder_config(r.get("embedder_config"));
             CollectionResponse {
                 name,
                 dimension,
@@ -210,6 +260,7 @@ pub async fn list_collections(
                 bm25_enabled,
                 deletion_protected,
                 tags,
+                embedder,
             }
         })
         .collect();
@@ -223,7 +274,7 @@ pub async fn describe_collection(
     axum::extract::Path(name): axum::extract::Path<String>,
 ) -> Result<Json<CollectionResponse>, ApiError> {
     let row = sqlx::query(
-        "SELECT id, name, dimension, metric, status, bm25_enabled, deletion_protected, tags FROM _onecortex_vector.collections WHERE name = $1",
+        "SELECT id, name, dimension, metric, status, bm25_enabled, deletion_protected, tags, embedder_config FROM _onecortex_vector.collections WHERE name = $1",
     )
     .bind(&name)
     .fetch_optional(&state.pool)
@@ -250,6 +301,7 @@ pub async fn describe_collection(
         bm25_enabled: row.get("bm25_enabled"),
         deletion_protected: row.get("deletion_protected"),
         tags: row.get("tags"),
+        embedder: decode_embedder_config(row.get("embedder_config")),
     }))
 }
 
@@ -309,7 +361,7 @@ pub async fn configure_collection(
             bm25_enabled       = COALESCE($4, bm25_enabled),
             updated_at         = now()
         WHERE name = $1
-        RETURNING id, name, dimension, metric, status, deletion_protected, bm25_enabled, tags
+        RETURNING id, name, dimension, metric, status, deletion_protected, bm25_enabled, tags, embedder_config
         "#,
     )
     .bind(&name)
@@ -352,6 +404,7 @@ pub async fn configure_collection(
         bm25_enabled: row.get("bm25_enabled"),
         deletion_protected: row.get("deletion_protected"),
         tags: row.get("tags"),
+        embedder: decode_embedder_config(row.get("embedder_config")),
     }))
 }
 

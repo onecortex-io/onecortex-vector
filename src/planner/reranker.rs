@@ -3,6 +3,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, warn};
 
+pub use crate::http_retry::HttpKind;
+use crate::http_retry::{self, HttpRetryError};
+
 /// A single candidate to be reranked.
 #[derive(Debug, Clone)]
 pub struct RerankCandidate {
@@ -25,20 +28,6 @@ pub struct RerankResult {
     pub values: Option<Vec<f32>>,
 }
 
-/// Classification of an upstream HTTP failure, used to pick the right
-/// HTTP status when bubbling out to the API edge.
-#[derive(Debug, Clone)]
-pub enum HttpKind {
-    /// Request timed out (we never heard back from the provider).
-    Timeout,
-    /// TCP/TLS connect failure or DNS error before the request was sent.
-    Connect,
-    /// We got a response, but the provider returned a non-2xx status.
-    Status(u16),
-    /// Anything else — body decode error, redirect loop, etc.
-    Other,
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum RerankerError {
     #[error("Reranker HTTP error ({kind:?}): {message}")]
@@ -55,17 +44,8 @@ impl RerankerError {
     /// Classify a reqwest transport error into a `RerankerError::Http` with
     /// the matching `HttpKind`.
     pub fn from_reqwest(e: reqwest::Error) -> Self {
-        let kind = if e.is_timeout() {
-            HttpKind::Timeout
-        } else if e.is_connect() {
-            HttpKind::Connect
-        } else if let Some(status) = e.status() {
-            HttpKind::Status(status.as_u16())
-        } else {
-            HttpKind::Other
-        };
         RerankerError::Http {
-            kind,
+            kind: http_retry::classify(&e),
             message: e.to_string(),
         }
     }
@@ -76,6 +56,15 @@ impl RerankerError {
         RerankerError::Http {
             kind: HttpKind::Status(status.as_u16()),
             message: message.into(),
+        }
+    }
+}
+
+impl From<HttpRetryError> for RerankerError {
+    fn from(err: HttpRetryError) -> Self {
+        match err {
+            HttpRetryError::Transport { kind, message } => RerankerError::Http { kind, message },
+            HttpRetryError::RateLimited(n) => RerankerError::RateLimited(n),
         }
     }
 }
@@ -103,41 +92,9 @@ pub trait Reranker: Send + Sync {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared retry helper — exponential backoff for HTTP 429 (rate limit).
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Sends an HTTP request, retrying on 429 with exponential backoff.
-/// `build_request`: closure that returns a fresh `RequestBuilder` each attempt
-/// (required because `RequestBuilder` is not `Clone`).
-async fn send_with_retry(
-    build_request: impl Fn() -> reqwest::RequestBuilder,
-    max_retries: u32,
-) -> Result<reqwest::Response, RerankerError> {
-    let mut delay_ms = 1_000u64;
-    for attempt in 0..=max_retries {
-        let response = build_request()
-            .send()
-            .await
-            .map_err(RerankerError::from_reqwest)?;
-
-        if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            if attempt == max_retries {
-                return Err(RerankerError::RateLimited(max_retries));
-            }
-            warn!(
-                attempt = attempt + 1,
-                delay_ms, "Reranker rate limited (429); retrying"
-            );
-            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-            delay_ms = (delay_ms * 2).min(30_000);
-            continue;
-        }
-        return Ok(response);
-    }
-    // Unreachable: the loop always returns inside the body.
-    Err(RerankerError::RateLimited(max_retries))
-}
+// Retry helper lives in `crate::http_retry` and is shared with the embedder.
+// Conversion to `RerankerError` is via the `From<HttpRetryError>` impl above.
+use http_retry::send_with_retry;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. NoopReranker — passes candidates through unchanged.
