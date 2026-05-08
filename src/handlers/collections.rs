@@ -116,7 +116,10 @@ pub async fn create_collection(
     }
 
     let collection_id = Uuid::new_v4();
-    let bm25_enabled = req.bm25_enabled.unwrap_or(false);
+    // Default flipped to true in v0.3 (DX §8): hybrid is a core feature; disabling
+    // by default forced users to opt in even though the storage cost is small and
+    // the query-time cost is pay-per-query. Existing collections are unaffected.
+    let bm25_enabled = req.bm25_enabled.unwrap_or(true);
     let deletion_protected = req.deletion_protected.unwrap_or(false);
 
     // Preflight: if an embedder is bound, build it and verify the model's

@@ -1,7 +1,6 @@
 use crate::{
-    embedding::{EmbedInputType, QueryEmbedCache},
     error::ApiError,
-    planner::reranker::RerankCandidate,
+    planner::plan::{self, ExecutionResult},
     state::AppState,
 };
 use axum::{
@@ -10,7 +9,6 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
-use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -124,477 +122,63 @@ pub struct BatchQueryResponse {
     pub results: Vec<serde_json::Value>,
 }
 
-/// Embed a query text via the bound embedder, hitting (and populating) the
-/// shared LRU cache unless `no_cache` is true.
-async fn embed_query_text(
-    factory: &Arc<crate::embedding::EmbedderFactory>,
-    cache: &Arc<QueryEmbedCache>,
-    ec: &crate::embedding::EmbedderConfig,
-    text: &str,
-    no_cache: bool,
-) -> Result<Arc<Vec<f32>>, ApiError> {
-    let embedder = factory.for_config(ec).map_err(ApiError::from)?;
-    if no_cache {
-        let mut vectors = embedder
-            .embed(&[text.to_string()], EmbedInputType::Query)
-            .await
-            .map_err(ApiError::from)?;
-        let v = vectors.pop().ok_or_else(|| {
-            ApiError::Internal(anyhow::anyhow!("embedder returned empty result for query"))
-        })?;
-        return Ok(Arc::new(v));
-    }
-    let key = QueryEmbedCache::make_key(embedder.backend(), embedder.model(), text);
-    if let Some(hit) = cache.get(&key).await {
-        return Ok(hit);
-    }
-    let mut vectors = embedder
-        .embed(&[text.to_string()], EmbedInputType::Query)
-        .await
-        .map_err(ApiError::from)?;
-    let v = vectors.pop().ok_or_else(|| {
-        ApiError::Internal(anyhow::anyhow!("embedder returned empty result for query"))
-    })?;
-    let arc = Arc::new(v);
-    cache.insert(key, arc.clone()).await;
-    Ok(arc)
-}
-
-/// POST /collections/:name/query
+/// POST /collections/:name/query — dense ANN. Compiles to a Plan with a
+/// fixed `Source::Dense` and runs through the shared executor.
 pub async fn query_vectors(
     State(state): State<AppState>,
     axum::extract::Path(collection_name): axum::extract::Path<String>,
     AxumQuery(params): AxumQuery<QueryParams>,
     Json(req): Json<QueryRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    if req.top_k < 1 || req.top_k > 10_000 {
-        return Err(ApiError::invalid_argument(
-            "topK must be between 1 and 10000".to_string(),
-        ));
-    }
-    if let Some(threshold) = req.score_threshold {
-        if !(0.0..=1.0).contains(&threshold) {
-            return Err(ApiError::invalid_argument(
-                "scoreThreshold must be between 0.0 and 1.0".to_string(),
-            ));
-        }
-    }
-    if let Some(ref group_opts) = req.group_by {
-        if group_opts.field.is_empty() {
-            return Err(ApiError::invalid_argument(
-                "groupBy.field must not be empty".to_string(),
-            ));
-        }
-        if group_opts.limit == 0 || group_opts.limit > 100 {
-            return Err(ApiError::invalid_argument(
-                "groupBy.limit must be between 1 and 100".to_string(),
-            ));
-        }
-        if group_opts.group_size == 0 || group_opts.group_size > 100 {
-            return Err(ApiError::invalid_argument(
-                "groupBy.groupSize must be between 1 and 100".to_string(),
-            ));
-        }
-    }
-
     let collection =
         crate::handlers::records::resolve_collection(&state.pool, &collection_name).await?;
-    let namespace = req.namespace.clone().unwrap_or_default();
-
-    // Resolve query vector — exactly one of `vector`, `id`, or `text` (server-side embed).
-    let inputs_set = [req.vector.is_some(), req.id.is_some(), req.text.is_some()]
-        .iter()
-        .filter(|b| **b)
-        .count();
-    if inputs_set > 1 {
-        return Err(ApiError::values_and_text_conflict(None));
-    }
-    let query_vec = if let Some(vec) = &req.vector {
-        vec.clone()
-    } else if let Some(id) = &req.id {
-        let row = sqlx::query(&format!(
-            "SELECT values::text FROM {} WHERE id = $1 AND namespace = $2",
-            collection.table_ref()
-        ))
-        .bind(id)
-        .bind(&namespace)
-        .fetch_optional(&state.pool)
-        .await?
-        .ok_or_else(|| ApiError::not_found(format!("Record '{id}' not found.")))?;
-        crate::handlers::records::parse_pgvector_str(&row.get::<String, _>("values"))
-    } else if let Some(text) = &req.text {
-        let ec = collection
-            .embedder_config
-            .as_ref()
-            .ok_or_else(ApiError::embedder_not_configured)?;
-        let vec_arc = embed_query_text(
-            &state.embedder_factory,
-            &state.embed_cache,
-            ec,
-            text,
-            params.no_cache,
-        )
-        .await?;
-        if vec_arc.len() != collection.dimension as usize {
-            return Err(ApiError::embedder_dimension_mismatch(
-                collection.dimension as usize,
-                vec_arc.len(),
-            ));
-        }
-        (*vec_arc).clone()
-    } else {
-        return Err(ApiError::invalid_argument(
-            "Provide one of 'vector', 'id', or 'text'".to_string(),
-        ));
-    };
-
-    if query_vec.len() != collection.dimension as usize {
-        return Err(ApiError::dimension_mismatch(
-            None,
-            collection.dimension as usize,
-            query_vec.len(),
-        ));
-    }
-
-    // Build query vector string for SQL
-    let vec_str = format!(
-        "[{}]",
-        query_vec
-            .iter()
-            .map(|f| f.to_string())
-            .collect::<Vec<_>>()
-            .join(",")
-    );
-
-    // Select the distance operator based on metric -- see 00-reference.md section 4 and 5
-    let dist_op = match collection.metric.as_str() {
-        "cosine" => "<=>",
-        "euclidean" => "<->",
-        "dotproduct" => "<#>",
-        _ => "<=>",
-    };
-
-    // Build filter clause
-    let (filter_sql, filter_params) = if let Some(f) = &req.filter {
-        crate::planner::filter_translator::translate_filter(f, 3)?
-    } else {
-        ("TRUE".to_string(), vec![])
-    };
-
-    // When reranking: fetch top_k * 5 candidates to widen the reranker's pool,
-    // capped at 10,000 (absolute max) and at the provider's per-request limit.
-    let fetch_k = if req.rerank.is_some() {
-        let provider_max = state.reranker.max_candidates();
-        let provider_cap = if provider_max > 10_000 {
-            10_000i64
-        } else {
-            provider_max as i64
-        };
-        (req.top_k * 5).min(10_000).min(provider_cap)
-    } else {
-        req.top_k
-    };
-
-    // When grouping: over-fetch to ensure enough diverse groups
-    let fetch_k = if req.group_by.is_some() {
-        (fetch_k * 5).min(10_000)
-    } else {
-        fetch_k
-    };
-
-    let top_n = req
-        .rerank
-        .as_ref()
-        .and_then(|r| r.top_n)
-        .unwrap_or(req.top_k);
-
-    // When reranking or grouping we always need metadata
-    let need_metadata = req.include_metadata || req.rerank.is_some() || req.group_by.is_some();
-    let values_col = if req.include_values {
-        "values::text"
-    } else {
-        "NULL::text AS values"
-    };
-    let metadata_col = if need_metadata {
-        "metadata"
-    } else {
-        "NULL::jsonb AS metadata"
-    };
-
-    // CRITICAL: ORDER BY must use the IDENTICAL operator expression as the SELECT distance column.
-    // Using an alias in ORDER BY defeats DiskANN index usage. See 00-reference.md section 5.
-    let sql = format!(
-        r#"
-        SELECT id, {values_col}, {metadata_col},
-               values {dist_op} $1::vector AS distance
-        FROM {}
-        WHERE namespace = $2
-          AND ({filter_sql})
-        ORDER BY values {dist_op} $1::vector
-        LIMIT $3
-        "#,
-        collection.table_ref()
-    );
-
-    let mut query = sqlx::query(&sql)
-        .bind(&vec_str)
-        .bind(&namespace)
-        .bind(fetch_k);
-    for p in &filter_params {
-        query = match p {
-            serde_json::Value::String(s) => query.bind(s.as_str()),
-            _ => query.bind(p.to_string()),
-        };
-    }
-
-    let rows = query.fetch_all(&state.pool).await?;
-
-    // Convert distances to scores -- see 00-reference.md section 4
-    let mut matches: Vec<Match> = rows
-        .into_iter()
-        .map(|row| {
-            let id: String = row.get("id");
-            let distance: f64 = row.get("distance");
-            let values_str: Option<String> = row.get("values");
-            let metadata: Option<serde_json::Value> = row.get("metadata");
-
-            let score = match collection.metric.as_str() {
-                "cosine" => 1.0 - distance,
-                "euclidean" => 1.0 / (1.0 + distance),
-                "dotproduct" => -distance,
-                _ => 1.0 - distance,
-            };
-
-            Match {
-                id,
-                score,
-                values: values_str.map(|s| crate::handlers::records::parse_pgvector_str(&s)),
-                metadata,
-            }
-        })
-        .collect();
-
-    // Apply reranking if requested.
-    if let Some(rerank_opts) = &req.rerank {
-        let candidates: Vec<RerankCandidate> = matches
-            .into_iter()
-            .map(|m| {
-                let text = m
-                    .metadata
-                    .as_ref()
-                    .and_then(|meta| meta.get(&rerank_opts.rank_field))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-                RerankCandidate {
-                    id: m.id,
-                    score: m.score as f32,
-                    text,
-                    metadata: m.metadata,
-                    values: m.values,
-                }
-            })
-            .collect();
-
-        let reranked = state
-            .reranker
-            .rerank(
-                &rerank_opts.query,
-                candidates,
-                top_n as usize,
-                rerank_opts.model.as_deref(),
-            )
-            .await
-            .map_err(ApiError::from)?;
-
-        matches = reranked
-            .into_iter()
-            .map(|r| Match {
-                id: r.id,
-                score: r.rerank_score as f64,
-                metadata: if req.include_metadata {
-                    r.metadata
-                } else {
-                    None
-                },
-                values: r.values,
-            })
-            .collect();
-    }
-
-    // Apply score threshold filtering (after reranking if applicable)
-    if let Some(threshold) = req.score_threshold {
-        matches.retain(|m| m.score >= threshold);
-    }
-
-    // Grouping: bucket matches by a metadata field value
-    if let Some(group_opts) = &req.group_by {
-        let mut group_order: Vec<String> = Vec::new();
-        let mut groups_map: std::collections::HashMap<String, Vec<Match>> =
-            std::collections::HashMap::new();
-        let total_matches = matches.len();
-        let mut field_seen = false;
-
-        for m in matches {
-            let raw = m
-                .metadata
-                .as_ref()
-                .and_then(|meta| meta.get(&group_opts.field));
-            let group_key = match raw {
-                Some(v) => {
-                    field_seen = true;
-                    match v.as_str() {
-                        Some(s) => s.to_string(),
-                        None => v.to_string(),
-                    }
-                }
-                None => String::new(),
-            };
-
-            if !groups_map.contains_key(&group_key) {
-                group_order.push(group_key.clone());
-            }
-            let entry = groups_map.entry(group_key).or_default();
-            if entry.len() < group_opts.group_size {
-                entry.push(Match {
-                    id: m.id,
-                    score: m.score,
-                    values: if req.include_values { m.values } else { None },
-                    metadata: if req.include_metadata {
-                        m.metadata
-                    } else {
-                        None
-                    },
-                });
-            }
-        }
-
-        // If matches existed but none of them carried the requested field,
-        // surface a typed error rather than returning a single empty-key
-        // bucket — that silent default has burned users in the past.
-        if total_matches > 0 && !field_seen {
-            return Err(ApiError::groupby_field_missing(&group_opts.field));
-        }
-
-        let groups: Vec<GroupResult> = group_order
-            .into_iter()
-            .take(group_opts.limit)
-            .map(|key| GroupResult {
-                matches: groups_map.remove(&key).unwrap_or_default(),
-                key,
-            })
-            .collect();
-
-        return Ok(Json(
+    let compiled = plan::compile_query(&req, &collection, &state, params.no_cache).await?;
+    let namespace = compiled.namespace.clone();
+    match plan::execute(&state, &collection, compiled).await? {
+        ExecutionResult::Flat { matches } => Ok(Json(
+            serde_json::to_value(QueryResponse { namespace, matches }).unwrap(),
+        )),
+        ExecutionResult::Grouped { groups } => Ok(Json(
             serde_json::to_value(GroupedQueryResponse {
                 namespace,
                 grouped: true,
                 groups,
             })
             .unwrap(),
-        ));
+        )),
     }
-
-    Ok(Json(
-        serde_json::to_value(QueryResponse { namespace, matches }).unwrap(),
-    ))
 }
 
-/// POST /collections/:name/query/hybrid
+/// POST /collections/:name/query/hybrid — dense + BM25 RRF. Compiles to a
+/// Plan with a fixed `Source::Hybrid`. Vector + text are still required here
+/// (preserving backwards compat); `/search` is the path for text-only hybrid.
 pub async fn query_hybrid(
     State(state): State<AppState>,
     axum::extract::Path(collection_name): axum::extract::Path<String>,
     Json(req): Json<crate::planner::hybrid::HybridQueryRequest>,
-) -> Result<Json<crate::planner::hybrid::HybridQueryResponse>, ApiError> {
-    if req.top_k < 1 || req.top_k > 10_000 {
-        return Err(ApiError::invalid_argument(
-            "topK must be between 1 and 10000".to_string(),
-        ));
-    }
-    if let Some(threshold) = req.score_threshold {
-        if !(0.0..=1.0).contains(&threshold) {
-            return Err(ApiError::invalid_argument(
-                "scoreThreshold must be between 0.0 and 1.0".to_string(),
-            ));
-        }
-    }
-
+) -> Result<Json<serde_json::Value>, ApiError> {
     let collection =
         crate::handlers::records::resolve_collection(&state.pool, &collection_name).await?;
-
+    // Ensure the legacy error message includes the collection name (compile_hybrid
+    // only knows the collection meta, not the request path component).
     if !collection.bm25_enabled {
         return Err(ApiError::hybrid_requires_bm25(&collection_name));
     }
-
-    if req.vector.len() != collection.dimension as usize {
-        return Err(ApiError::dimension_mismatch(
-            None,
-            collection.dimension as usize,
-            req.vector.len(),
-        ));
-    }
-
-    let mut result = crate::planner::hybrid::hybrid_query(
-        &state.pool,
-        &collection.table_ref(),
-        &req,
-        &collection.metric,
-    )
-    .await?;
-
-    // Apply reranking if requested.
-    if let Some(rerank_opts) = &req.rerank {
-        let top_n = rerank_opts.top_n.unwrap_or(req.top_k);
-        let candidates: Vec<RerankCandidate> = result
-            .matches
-            .into_iter()
-            .map(|m| {
-                let text = m
-                    .metadata
-                    .as_ref()
-                    .and_then(|meta| meta.get(&rerank_opts.rank_field))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-                RerankCandidate {
-                    id: m.id,
-                    score: m.score as f32,
-                    text,
-                    metadata: m.metadata,
-                    values: m.values,
-                }
+    let compiled = plan::compile_hybrid(&req, &collection).await?;
+    let namespace = compiled.namespace.clone();
+    match plan::execute(&state, &collection, compiled).await? {
+        ExecutionResult::Flat { matches } => Ok(Json(
+            serde_json::to_value(QueryResponse { namespace, matches }).unwrap(),
+        )),
+        ExecutionResult::Grouped { groups } => Ok(Json(
+            serde_json::to_value(GroupedQueryResponse {
+                namespace,
+                grouped: true,
+                groups,
             })
-            .collect();
-
-        let reranked = state
-            .reranker
-            .rerank(
-                &rerank_opts.query,
-                candidates,
-                top_n as usize,
-                rerank_opts.model.as_deref(),
-            )
-            .await
-            .map_err(ApiError::from)?;
-
-        result.matches = reranked
-            .into_iter()
-            .map(|r| crate::planner::hybrid::HybridMatch {
-                id: r.id,
-                score: r.rerank_score as f64,
-                metadata: if req.include_metadata {
-                    r.metadata
-                } else {
-                    None
-                },
-                values: r.values,
-            })
-            .collect();
+            .unwrap(),
+        )),
     }
-
-    if let Some(threshold) = req.score_threshold {
-        result.matches.retain(|m| m.score >= threshold);
-    }
-
-    Ok(Json(result))
 }
 
 /// POST /collections/:name/query/batch
@@ -643,6 +227,8 @@ pub async fn query_batch(
 
 /// Internal: execute a dense ANN query and return scored matches.
 /// Handles distance→score conversion but NOT reranking, score threshold, or grouping.
+/// Used by `recommend`. The unified `/search` and `/query` paths go through the
+/// Plan executor instead — see `crate::planner::plan::sources::dense`.
 #[allow(clippy::too_many_arguments)]
 async fn execute_ann_query(
     pool: &sqlx::PgPool,

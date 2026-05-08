@@ -35,6 +35,9 @@ cargo clippy -- -D warnings
 | `deletionProtected` | Boolean (`true`/`false`) in both request and response; never the old `"enabled"/"disabled"` string enum |
 | Query response | `{ namespace, matches: [...] }` — no `results: []` field; grouped queries return `{ namespace, grouped: true, groups: [{key, matches}] }` |
 | Fetch response | Both `fetch` and `fetch_by_metadata` return `{ namespace, records: [{id, values?, metadata?}], nextCursor: null }` |
+| Query Plan AST | All `/search`, `/query`, `/query/hybrid` requests compile to a `Plan` in `src/planner/plan/` and run through one executor. New post-processing stages plug in as `Stage` variants. |
+| `bm25Enabled` default | `true` on collection create as of 0.3 (was `false` pre-0.3). Existing rows are unaffected; the default only applies when the request omits the field. |
+| `/search` mode selection | Auto-detect: `text` + `bm25Enabled=true` ⇒ hybrid. Force via `hybrid: true \| false \| { alpha?, bm25Weight? }`. Hybrid without `vector` ⇒ embed `text` for the dense leg. |
 
 ---
 

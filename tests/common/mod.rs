@@ -1,3 +1,8 @@
+// Each integration-test binary independently includes this module; not every
+// binary uses every helper, so per-binary dead-code lints are noisy and
+// pre-existing.
+#![allow(dead_code)]
+
 /// Test server handle with base URL and pool.
 pub struct TestServer {
     pub base_url: String,
@@ -60,7 +65,9 @@ fn build_test_router(state: onecortex_vector::state::AppState) -> axum::Router {
         routing::{get, post},
         Router,
     };
-    use onecortex_vector::handlers::{aliases, collections, health, namespaces, query, records};
+    use onecortex_vector::handlers::{
+        aliases, collections, health, namespaces, query, records, search,
+    };
 
     Router::new()
         .route("/health", get(health::health))
@@ -112,6 +119,7 @@ fn build_test_router(state: onecortex_vector::state::AppState) -> axum::Router {
             "/v1/collections/:name/sample",
             post(records::sample_records),
         )
+        .route("/v1/collections/:name/search", post(search::search))
         .route("/v1/collections/:name/query", post(query::query_vectors))
         .route(
             "/v1/collections/:name/query/hybrid",
@@ -149,12 +157,16 @@ pub async fn create_test_index(server: &TestServer, dimension: i32, metric: &str
     let name = &name[..name.len().min(45)]; // Ensure <= 45 chars
 
     let client = reqwest::Client::new();
+    // Explicitly disable BM25 here so tests that need a non-BM25 collection
+    // keep working after the v0.3 default flip. Tests that *want* BM25 should
+    // call `create_test_index_with_bm25` instead.
     let resp = client
         .post(format!("{}/v1/collections", server.base_url))
         .json(&serde_json::json!({
             "name": name,
             "dimension": dimension,
             "metric": metric,
+            "bm25Enabled": false,
         }))
         .send()
         .await

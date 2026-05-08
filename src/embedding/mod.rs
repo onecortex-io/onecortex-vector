@@ -16,6 +16,7 @@ pub mod cache;
 mod cohere;
 mod jina;
 mod openai;
+pub mod query;
 mod tei;
 mod voyage;
 
@@ -23,6 +24,7 @@ pub use cache::QueryEmbedCache;
 pub use cohere::CohereEmbedder;
 pub use jina::JinaEmbedder;
 pub use openai::OpenAiEmbedder;
+pub use query::embed_query_text;
 pub use tei::TeiEmbedder;
 pub use voyage::VoyageEmbedder;
 

@@ -72,7 +72,7 @@ async fn main() {
 }
 
 fn build_public_router(state: state::AppState) -> Router {
-    use handlers::{aliases, collections, health, namespaces, query, records};
+    use handlers::{aliases, collections, health, namespaces, query, records, search};
 
     Router::new()
         // Health (exempt from auth)
@@ -128,6 +128,7 @@ fn build_public_router(state: state::AppState) -> Router {
             post(records::sample_records),
         )
         // Query
+        .route("/v1/collections/:name/search", post(search::search))
         .route("/v1/collections/:name/query", post(query::query_vectors))
         .route(
             "/v1/collections/:name/query/hybrid",

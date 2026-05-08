@@ -8,6 +8,24 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **`POST /v1/collections/:name/search`** — unified retrieval endpoint that
+  collapses `/query` and `/query/hybrid` behind a single surface. Auto-detects
+  hybrid when `text` is sent against a collection with `bm25Enabled=true`;
+  falls back to dense otherwise. The mode can be forced via the `hybrid` body
+  field: `hybrid: true | false | { alpha?, bm25Weight? }`. Hybrid with no
+  `vector` automatically embeds `text` for the dense leg via the bound
+  embedder (F1). Accepts the same `filter`, `topK`, `rerank`, `scoreThreshold`,
+  `groupBy`, `includeValues`, `includeMetadata` fields as `/query`, plus a new
+  optional `dedup: { by }` post-stage.
+- **`?explain=true` on `/search`** — compiles the request to a Plan and returns
+  it as JSON without executing. Useful for debugging filter translation,
+  retrieve-K sizing, and the stage pipeline. Doesn't run any DB query.
+- **Internal Query Plan AST + executor** in `src/planner/plan/` — every public
+  query endpoint now compiles its request into a typed `Plan` (`Source` +
+  `Stage[]`) and runs through one shared executor. New post-processing stages
+  (MMR, time-decay, etc.) plug in here as `Stage` variants and become
+  available to all endpoints at once. See `docs/analysis/03_ARCHITECTURE_CHANGES.md`
+  §1 for the design.
 - **`$contains`, `$containsAny`, `$containsAll` metadata filter
   operators** for fields whose value is an array of scalars (strings,
   numbers, booleans). Closes a gap that previously forced users to
@@ -16,6 +34,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `$containsAll` take a non-empty array of scalars and reject nested
   objects/arrays. `$elemMatch` remains the operator for arrays of
   objects. See `docs/filters.md` for the full DSL.
+
+### Changed
+
+- **`bm25Enabled` defaults to `true` on new collections** (was `false`).
+  Hybrid is a core feature; storage cost is small and query-time cost is
+  pay-per-query, so making users opt in was a DX wart (DX §8). Existing
+  collections are unaffected — only `POST /v1/collections` requests that
+  omit `bm25Enabled` see the new default. Pass `"bm25Enabled": false`
+  explicitly to preserve the old behaviour.
+- Internally, `/v1/collections/:name/query` and `/v1/collections/:name/query/hybrid`
+  now compile to the same Plan AST and run through the new executor. Wire
+  contracts (request bodies, response shapes, error codes) are unchanged.
 
 ## [0.2.1] — 2026-05-01
 
