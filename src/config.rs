@@ -9,9 +9,6 @@ pub struct AppConfig {
     /// ONECORTEX_VECTOR_API_PORT — default 8080
     pub api_port: u16,
 
-    /// ONECORTEX_VECTOR_ADMIN_PORT — default 9090
-    pub admin_port: u16,
-
     /// ONECORTEX_VECTOR_MAX_CONNS — default 50
     pub max_conns: u32,
 
@@ -104,7 +101,6 @@ impl AppConfig {
         Ok(AppConfig {
             database_url: required_env("ONECORTEX_VECTOR_DATABASE_URL")?,
             api_port: env_parse("ONECORTEX_VECTOR_API_PORT", 8080)?,
-            admin_port: env_parse("ONECORTEX_VECTOR_ADMIN_PORT", 9090)?,
             max_conns: env_parse("ONECORTEX_VECTOR_MAX_CONNS", 50)?,
             default_diskann_neighbors: env_parse("ONECORTEX_VECTOR_DEFAULT_DISKANN_NEIGHBORS", 50)?,
             default_diskann_search_list: env_parse(
@@ -228,7 +224,6 @@ mod tests {
 
         let config = AppConfig::from_env().unwrap();
         assert_eq!(config.api_port, 8080);
-        assert_eq!(config.admin_port, 9090);
         assert_eq!(config.max_conns, 50);
         assert_eq!(config.default_diskann_neighbors, 50); // NOT 64 — see 00-reference.md §6
         assert_eq!(config.default_diskann_search_list, 100);

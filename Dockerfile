@@ -11,7 +11,6 @@
 #   docker run \
 #     -e ONECORTEX_VECTOR_DATABASE_URL=postgres://user:pass@host:5432/db \
 #     -p 8080:8080 \
-#     -p 9090:9090 \
 #     onecortex-vector:latest
 # =============================================================================
 
@@ -40,6 +39,6 @@ FROM gcr.io/distroless/cc-debian12
 COPY --from=builder /app/target/release/onecortex-vector /usr/local/bin/onecortex-vector
 COPY --from=builder /app/migrations /migrations
 
-EXPOSE 8080 9090
+EXPOSE 8080
 
 ENTRYPOINT ["/usr/local/bin/onecortex-vector"]

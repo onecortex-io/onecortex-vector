@@ -17,8 +17,3 @@ pub async fn version() -> Json<serde_json::Value> {
         "version": env!("CARGO_PKG_VERSION"),
     }))
 }
-
-pub async fn metrics() -> String {
-    // Implemented in Phase 6. Return empty for now.
-    String::new()
-}

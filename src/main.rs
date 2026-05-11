@@ -50,28 +50,16 @@ async fn main() {
         embed_cache,
     };
 
-    // Public API router -- all endpoints except /metrics
-    let public_router = with_observability(build_public_router(state.clone()));
+    let router = with_observability(build_router(state));
 
-    // Admin router -- metrics + admin endpoints, internal port only
-    let admin_router = with_observability(build_admin_router(state.clone()));
+    let addr: SocketAddr = format!("0.0.0.0:{}", config.api_port).parse().unwrap();
+    tracing::info!("Listening on {addr}");
 
-    let public_addr: SocketAddr = format!("0.0.0.0:{}", config.api_port).parse().unwrap();
-    let admin_addr: SocketAddr = format!("0.0.0.0:{}", config.admin_port).parse().unwrap();
-
-    tracing::info!("Public API listening on {public_addr}");
-    tracing::info!("Admin API listening on {admin_addr}");
-
-    let public_listener = tokio::net::TcpListener::bind(public_addr).await.unwrap();
-    let admin_listener = tokio::net::TcpListener::bind(admin_addr).await.unwrap();
-
-    tokio::select! {
-        _ = axum::serve(public_listener, public_router) => {},
-        _ = axum::serve(admin_listener, admin_router)  => {},
-    }
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    axum::serve(listener, router).await.unwrap();
 }
 
-fn build_public_router(state: state::AppState) -> Router {
+fn build_router(state: state::AppState) -> Router {
     use handlers::{aliases, collections, health, namespaces, query, records, search};
 
     Router::new()
@@ -94,6 +82,9 @@ fn build_public_router(state: state::AppState) -> Router {
             "/v1/collections/:name/describe_collection_stats",
             post(collections::describe_collection_stats),
         )
+        // Collection maintenance
+        .route("/v1/collections/:name/vacuum", post(collections::vacuum))
+        .route("/v1/collections/:name/reindex", post(collections::reindex))
         // Data plane -- record operations
         .route(
             "/v1/collections/:name/records/upsert",
@@ -158,15 +149,5 @@ fn build_public_router(state: state::AppState) -> Router {
             "/v1/aliases/:alias",
             get(aliases::describe_alias).delete(aliases::delete_alias),
         )
-        .with_state(state)
-}
-
-fn build_admin_router(state: state::AppState) -> Router {
-    use handlers::{admin, health};
-    Router::new()
-        .route("/metrics", get(health::metrics))
-        .route("/admin/collections/:name/reindex", post(admin::reindex))
-        .route("/admin/collections/:name/vacuum", post(admin::vacuum))
-        .route("/admin/config", get(admin::dump_config))
         .with_state(state)
 }

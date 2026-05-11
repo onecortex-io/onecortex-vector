@@ -14,7 +14,6 @@ pub async fn start_test_server() -> TestServer {
     dotenvy::dotenv().ok();
     let mut config = onecortex_vector::config::AppConfig::from_env().unwrap();
     config.api_port = 0; // OS-assigned
-    config.admin_port = 0;
 
     let pool = onecortex_vector::db::pool::create_pool(&config)
         .await
@@ -147,6 +146,8 @@ fn build_test_router(state: onecortex_vector::state::AppState) -> axum::Router {
             "/v1/aliases/:alias",
             get(aliases::describe_alias).delete(aliases::delete_alias),
         )
+        .route("/v1/collections/:name/vacuum", post(collections::vacuum))
+        .route("/v1/collections/:name/reindex", post(collections::reindex))
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
         .with_state(state)
 }

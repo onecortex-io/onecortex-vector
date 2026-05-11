@@ -452,3 +452,51 @@ pub async fn describe_collection_stats(
         total_record_count: total,
     }))
 }
+
+/// POST /v1/collections/:name/vacuum
+///
+/// Runs VACUUM ANALYZE on the collection table to reclaim storage from deleted
+/// records and refresh PostgreSQL planner statistics.
+pub async fn vacuum(
+    State(state): State<AppState>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let collection = crate::handlers::records::resolve_collection(&state.pool, &name).await?;
+    crate::db::lifecycle::vacuum_collection(&state.pool, &collection.table_ref())
+        .await
+        .map_err(|e| ApiError::from(anyhow::anyhow!("vacuum failed: {e}")))?;
+    Ok(Json(
+        serde_json::json!({ "collection": name, "status": "ok" }),
+    ))
+}
+
+/// POST /v1/collections/:name/reindex
+///
+/// Drops and recreates the DiskANN index for the collection in a background
+/// task. Returns 202 Accepted immediately; the rebuild continues concurrently.
+pub async fn reindex(
+    State(state): State<AppState>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> Result<(axum::http::StatusCode, Json<serde_json::Value>), ApiError> {
+    let collection = crate::handlers::records::resolve_collection(&state.pool, &name).await?;
+    let table_name = crate::db::lifecycle::table_name_for(collection.id);
+    let metric = collection.metric.clone();
+    let pool = state.pool.clone();
+
+    tokio::spawn(async move {
+        if let Err(e) =
+            crate::db::lifecycle::rebuild_diskann_index(&pool, &table_name, &metric).await
+        {
+            tracing::error!(table_name, error = %e, "Reindex failed");
+        }
+    });
+
+    Ok((
+        axum::http::StatusCode::ACCEPTED,
+        Json(serde_json::json!({
+            "collection": name,
+            "status": "reindexing",
+            "message": "DiskANN index rebuild started in background."
+        })),
+    ))
+}

@@ -174,6 +174,61 @@ pub async fn build_bm25_index(pool: &PgPool, table_name: &str) -> Result<(), sql
     Ok(())
 }
 
+/// Run VACUUM ANALYZE on a collection table to reclaim space and refresh planner statistics.
+///
+/// VACUUM cannot run inside a transaction block; executing directly on the pool uses
+/// auto-commit mode, which is correct here.
+pub async fn vacuum_collection(pool: &PgPool, table_ref: &str) -> Result<(), sqlx::Error> {
+    // table_ref is always internally generated (UUID-based), never raw user input
+    sqlx::query(&format!("VACUUM ANALYZE {table_ref}"))
+        .execute(pool)
+        .await?;
+    tracing::info!(table_ref, "VACUUM ANALYZE complete");
+    Ok(())
+}
+
+/// Drop and recreate the DiskANN (StreamingDiskANN) index for a collection.
+///
+/// Uses CONCURRENTLY so reads are not blocked during the rebuild.
+/// Both DROP and CREATE CONCURRENTLY must run outside a transaction block;
+/// executing directly on the pool uses auto-commit mode, which is correct here.
+pub async fn rebuild_diskann_index(
+    pool: &PgPool,
+    table_name: &str, // "col_{uuid_simple}" — no schema prefix
+    metric: &str,
+) -> Result<(), sqlx::Error> {
+    let ops_class = match metric {
+        "cosine" => "vector_cosine_ops",
+        "euclidean" => "vector_l2_ops",
+        "dotproduct" => "vector_ip_ops",
+        _ => {
+            return Err(sqlx::Error::Protocol(format!(
+                "Unknown metric for reindex: {metric}"
+            )))
+        }
+    };
+    let idx = format!("{table_name}_diskann_idx");
+
+    sqlx::query(&format!("DROP INDEX IF EXISTS _onecortex.{idx}"))
+        .execute(pool)
+        .await?;
+
+    // num_neighbors=50 is the project default (CLAUDE.md). search_list_size=75 is the
+    // StreamingDiskANN recommended default. Neither is stored in the collections catalog,
+    // so project defaults are used here.
+    sqlx::query(&format!(
+        "CREATE INDEX CONCURRENTLY {idx} \
+         ON _onecortex.{table_name} \
+         USING diskann (values {ops_class}) \
+         WITH (num_neighbors = 50, search_list_size = 75)"
+    ))
+    .execute(pool)
+    .await?;
+
+    tracing::info!(table_name, "DiskANN index rebuilt");
+    Ok(())
+}
+
 /// Drops only the BM25 index (when bm25_enabled is toggled off via PATCH).
 pub async fn drop_bm25_index(pool: &PgPool, table_name: &str) -> Result<(), sqlx::Error> {
     sqlx::query(&format!(
