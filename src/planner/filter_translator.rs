@@ -96,31 +96,38 @@ pub fn translate_filter(
                             let arr = op_val.as_array().ok_or_else(|| {
                                 FilterError::Malformed("$in requires an array".to_string())
                             })?;
-                            let sql_arr: Vec<String> = arr
-                                .iter()
-                                .map(|v| {
-                                    v.as_str()
-                                        .map(|s| format!("'{s}'"))
-                                        .unwrap_or_else(|| v.to_string())
-                                })
-                                .collect();
-                            format!("{sql_field} = ANY(ARRAY[{}]::text[])", sql_arr.join(","))
+                            if arr.is_empty() {
+                                return Err(FilterError::Malformed(
+                                    "$in array must not be empty".to_string(),
+                                ));
+                            }
+                            let placeholders: Vec<String> =
+                                (0..arr.len()).map(|i| format!("${}", n + i)).collect();
+                            for v in arr {
+                                params.push(v.clone());
+                            }
+                            format!(
+                                "{sql_field} = ANY(ARRAY[{}]::text[])",
+                                placeholders.join(",")
+                            )
                         }
                         "$nin" => {
                             let arr = op_val.as_array().ok_or_else(|| {
                                 FilterError::Malformed("$nin requires an array".to_string())
                             })?;
-                            let sql_arr: Vec<String> = arr
-                                .iter()
-                                .map(|v| {
-                                    v.as_str()
-                                        .map(|s| format!("'{s}'"))
-                                        .unwrap_or_else(|| v.to_string())
-                                })
-                                .collect();
+                            if arr.is_empty() {
+                                return Err(FilterError::Malformed(
+                                    "$nin array must not be empty".to_string(),
+                                ));
+                            }
+                            let placeholders: Vec<String> =
+                                (0..arr.len()).map(|i| format!("${}", n + i)).collect();
+                            for v in arr {
+                                params.push(v.clone());
+                            }
                             format!(
                                 "NOT ({sql_field} = ANY(ARRAY[{}]::text[]))",
-                                sql_arr.join(",")
+                                placeholders.join(",")
                             )
                         }
                         "$geoRadius" => {
@@ -280,14 +287,25 @@ pub fn translate_filter(
                             let obj_path = jsonb_object_path(field);
                             format!("{obj_path} @> '{escaped}'::jsonb")
                         }
+                        "$exists" => {
+                            let exists = op_val.as_bool().ok_or_else(|| {
+                                FilterError::Malformed("$exists requires a boolean".to_string())
+                            })?;
+                            if exists {
+                                format!("({sql_field}) IS NOT NULL")
+                            } else {
+                                format!("({sql_field}) IS NULL")
+                            }
+                        }
                         other => return Err(FilterError::UnsupportedOperator(other.to_string())),
                     };
 
-                    // $in and $nin embed values directly (safe because we quote them above)
-                    // All other operators use parameterized binds
+                    // Operators that manage their own params (pushed inside the match arm above)
+                    // or inline values without bound parameters must be listed here to prevent
+                    // the fallthrough arm from double-pushing op_val.
                     match op.as_str() {
                         "$in" | "$nin" | "$geoRadius" | "$geoBBox" | "$elemMatch" | "$contains"
-                        | "$containsAny" | "$containsAll" => {} // values inlined in SQL above
+                        | "$containsAny" | "$containsAll" | "$exists" => {}
                         _ => {
                             params.push(op_val.clone());
                         }
@@ -361,8 +379,91 @@ mod tests {
 
     #[test]
     fn in_operator() {
-        let (sql, _) = translate_filter(&json!({"tag": {"$in": ["a", "b"]}}), 0).unwrap();
-        assert!(sql.contains("ANY(ARRAY["));
+        let (sql, params) = translate_filter(&json!({"tag": {"$in": ["a", "b"]}}), 0).unwrap();
+        assert!(sql.contains("ANY(ARRAY[$1,$2]::text[])"), "got: {sql}");
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0], json!("a"));
+        assert_eq!(params[1], json!("b"));
+    }
+
+    #[test]
+    fn nin_operator_binds_params() {
+        let (sql, params) = translate_filter(&json!({"tag": {"$nin": ["x", "y"]}}), 0).unwrap();
+        assert!(sql.contains("NOT"), "got: {sql}");
+        assert!(sql.contains("ANY(ARRAY[$1,$2]::text[])"), "got: {sql}");
+        assert_eq!(params.len(), 2);
+    }
+
+    #[test]
+    fn in_empty_array_errors() {
+        let r = translate_filter(&json!({"tag": {"$in": []}}), 0);
+        assert!(matches!(r, Err(FilterError::Malformed(_))));
+    }
+
+    #[test]
+    fn nin_empty_array_errors() {
+        let r = translate_filter(&json!({"tag": {"$nin": []}}), 0);
+        assert!(matches!(r, Err(FilterError::Malformed(_))));
+    }
+
+    #[test]
+    fn in_does_not_perturb_param_offset() {
+        // $in with 2 values consumes $3,$4; the $eq after it must land at $5
+        let (sql, params) = translate_filter(
+            &json!({"$and": [
+                {"tag": {"$in": ["a", "b"]}},
+                {"score": {"$eq": "news"}}
+            ]}),
+            2,
+        )
+        .unwrap();
+        assert!(sql.contains("$3,$4"), "got: {sql}");
+        assert!(sql.contains("$5"), "got: {sql}");
+        assert_eq!(params.len(), 3);
+    }
+
+    #[test]
+    fn exists_true() {
+        let (sql, params) = translate_filter(&json!({"status": {"$exists": true}}), 0).unwrap();
+        assert!(sql.contains("IS NOT NULL"), "got: {sql}");
+        assert!(params.is_empty());
+    }
+
+    #[test]
+    fn exists_false() {
+        let (sql, params) = translate_filter(&json!({"status": {"$exists": false}}), 0).unwrap();
+        assert!(sql.contains("IS NULL"), "got: {sql}");
+        assert!(!sql.contains("NOT NULL"), "got: {sql}");
+        assert!(params.is_empty());
+    }
+
+    #[test]
+    fn exists_nested_field() {
+        let (sql, _) = translate_filter(&json!({"user.role": {"$exists": true}}), 0).unwrap();
+        // Nested accessor: intermediate key uses -> (JSONB), leaf uses ->> (text)
+        assert!(sql.contains("metadata->'user'->>'role'"), "got: {sql}");
+        assert!(sql.contains("IS NOT NULL"), "got: {sql}");
+    }
+
+    #[test]
+    fn exists_non_bool_errors() {
+        let r = translate_filter(&json!({"status": {"$exists": "yes"}}), 0);
+        assert!(matches!(r, Err(FilterError::Malformed(_))));
+    }
+
+    #[test]
+    fn exists_does_not_perturb_param_offset() {
+        // $exists contributes no params; $eq after it should still land at $3
+        let (sql, params) = translate_filter(
+            &json!({"$and": [
+                {"flag": {"$exists": true}},
+                {"score": {"$gt": 5}}
+            ]}),
+            2,
+        )
+        .unwrap();
+        assert!(sql.contains("$3"), "score param should be $3, got: {sql}");
+        assert_eq!(params.len(), 1);
     }
 
     #[test]
