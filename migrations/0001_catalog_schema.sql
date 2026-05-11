@@ -1,7 +1,5 @@
--- Install pgvector and pgvectorscale.
--- CASCADE installs pgvector if not already present.
-CREATE EXTENSION IF NOT EXISTS vector;
-CREATE EXTENSION IF NOT EXISTS vectorscale CASCADE;
+-- NOTE: Extensions are created by postgres-init container before services start.
+-- vector and vectorscale are pre-created as superuser.
 
 -- NOTE: pg_textsearch is NOT installed here.
 -- It requires shared_preload_libraries=pg_textsearch (set in Docker Compose).
