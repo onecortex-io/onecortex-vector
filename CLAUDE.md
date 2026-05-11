@@ -15,6 +15,22 @@ cargo fmt --all -- --check
 cargo clippy -- -D warnings
 ```
 
+## Git Hooks (lefthook)
+
+One-time setup: `lefthook install`
+
+Pre-commit (fast):
+- `cargo fmt --check`
+- `cargo clippy -- -D warnings`
+- `cargo test --lib`
+- `gitleaks protect --staged --verbose`
+
+Pre-push:
+- `cargo test`
+
+Bypass a single hook: `SKIP=hookname git commit --no-verify`  
+Skip the entire suite: `LEFTHOOK=0 git commit`
+
 ---
 
 ## Key Technical Decisions

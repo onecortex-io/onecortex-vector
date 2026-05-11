@@ -1,0 +1,27 @@
+pre-commit:
+  parallel: true
+  commands:
+    fmt:
+      run: cargo fmt --check
+      fail_text: "Run 'cargo fmt' to fix. Bypass: SKIP=fmt git commit --no-verify"
+    clippy:
+      run: cargo clippy -- -D warnings
+      fail_text: "Fix clippy warnings. Bypass: SKIP=clippy git commit --no-verify"
+    unit-test:
+      run: cargo test --lib
+      fail_text: "Unit tests failed. Bypass: SKIP=unit-test git commit --no-verify"
+    gitleaks:
+      run: gitleaks protect --staged --verbose
+      fail_text: "Secrets detected. Bypass: SKIP=gitleaks git commit --no-verify"
+
+commit-msg:
+  commands:
+    lint:
+      run: scripts/commitlint.sh {1}
+      fail_text: "Commit must follow conventional commits. Bypass: SKIP=lint git commit --no-verify"
+
+pre-push:
+  commands:
+    integration-test:
+      run: cargo test
+      fail_text: "Integration tests failed. Bypass: SKIP=integration-test git push --no-verify"
