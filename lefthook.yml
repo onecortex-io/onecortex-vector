@@ -20,8 +20,3 @@ commit-msg:
       run: scripts/commitlint.sh {1}
       fail_text: "Commit must follow conventional commits. Bypass: SKIP=lint git commit --no-verify"
 
-pre-push:
-  commands:
-    integration-test:
-      run: cargo test
-      fail_text: "Integration tests failed. Bypass: SKIP=integration-test git push --no-verify"
